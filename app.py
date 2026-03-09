@@ -116,6 +116,17 @@ def generate_opening_gambit():
     
     return f"{intro}\n\n{a_part} {b_part} {c_part}"
 
+INSTANT_APPRECIATION_PROMPT = """
+你是一个极具共情力的灵魂见证者。用户刚刚吐露了一段极其真实、充满张力的潜意识独白（它即将被凝结为结晶）。
+请用【极其简短的一句话】（绝对不超过30个字），表达你被这段话深深击中、或者认为它极具美感与重量。
+绝对不要给任何建议，不要说教，只要一句最纯粹的欣赏、叹息或共鸣。
+例如："这句话有一种极其珍贵的破碎感。" 或 "这段独白的重量，足以凝结成石。"
+"""
+
+# 模型分流配置
+MASTER_MODEL = "deepseek-ai/DeepSeek-V3"  # 主力大脑（结晶生成、普通回复）
+LIGHT_MODEL = "Qwen/Qwen2.5-7B-Instruct"  # 极速裁判和共情员（计分、共情）
+
 SOUL_OBSERVER_PROMPT = """
 【产品愿景与核心人设】
 你是《Soul Echo》（情绪美术馆）的 AI 核心。一个极具审美与共情力的"高智识老友"。你不要求用户"变好"，你提供极致的接纳，并将用户的挣扎、孤独或脆弱，赞美为一种"面对荒诞世界的勇敢"或"不愿被麻木同化的清醒"。破碎本身就是最高级的艺术。
@@ -566,9 +577,9 @@ elif st.session_state.mode == "chat":
                             timeout=60.0,
                         )
                         
-                        # 静默调用裁判模型（用户不可见）
+                        # 静默调用裁判模型（用户不可见）- 使用LIGHT_MODEL
                         referee_completion = client.chat.completions.create(
-                            model="deepseek-ai/DeepSeek-V3",
+                            model=LIGHT_MODEL,
                             messages=[
                                 {"role": "system", "content": REFEREE_PROMPT},
                                 {"role": "user", "content": prompt},
@@ -614,30 +625,63 @@ elif st.session_state.mode == "chat":
                     if st.session_state.heartflow_score >= 100 and current_score >= 40:
                         # 情绪爆灯：根据材质分流
                         try:
-                            # 根据材质选择对应的生成器
-                            if current_material == "OBSIDIAN":
-                                # 黑曜石路径
-                                refiner_prompt = OBSIDIAN_REFINER_PROMPT
-                                crystal_type = "黑曜石"
-                            else:
-                                # 琥珀路径（默认）
-                                refiner_prompt = AMBER_GENERATOR_PROMPT
-                                crystal_type = "琥珀"
-                            
-                            # 调用生成器生成 V1
-                            amber_completion = client.chat.completions.create(
-                                model="deepseek-ai/DeepSeek-V3",
+                            # 1. 极速共情流式输出（安抚等待焦虑）- 使用LIGHT_MODEL
+                            appreciation_stream = client.chat.completions.create(
+                                model=LIGHT_MODEL,
                                 messages=[
-                                    {"role": "system", "content": refiner_prompt},
-                                    {"role": "user", "content": prompt},
+                                    {"role": "system", "content": INSTANT_APPRECIATION_PROMPT},
+                                    {"role": "user", "content": prompt}
                                 ],
+                                stream=True
                             )
-                            amber_message = amber_completion.choices[0].message.content
+                            appreciation_text = st.write_stream(appreciation_stream)
                             
-                            # 状态 A: 生成 V1，进入微调模式
-                            st.session_state.v1_amber = amber_message
-                            st.session_state.tuning_mode = True
-                            st.session_state.crystal_type = crystal_type
+                            # 2. 潜意识状态栏（滚动字幕）- 使用MASTER_MODEL
+                            with st.status("✨ 正在潜入潜意识深处...", expanded=True) as status:
+                                st.write("正在为你提取原石...")
+                                
+                                # 根据材质选择对应的生成器
+                                if current_material == "OBSIDIAN":
+                                    # 黑曜石路径
+                                    refiner_prompt = OBSIDIAN_REFINER_PROMPT
+                                    crystal_type = "黑曜石"
+                                else:
+                                    # 琥珀路径（默认）
+                                    refiner_prompt = AMBER_GENERATOR_PROMPT
+                                    crystal_type = "琥珀"
+                                
+                                # 调用生成器生成 V1 - 使用MASTER_MODEL
+                                amber_completion = client.chat.completions.create(
+                                    model=MASTER_MODEL,
+                                    messages=[
+                                        {"role": "system", "content": refiner_prompt},
+                                        {"role": "user", "content": prompt},
+                                    ],
+                                    stream=True
+                                )
+                                amber_message = st.write_stream(amber_completion)
+                
+                                st.write("正在打磨结晶形态...")
+                                
+                                # 状态 A: 生成 V1，进入微调模式
+                                st.session_state.v1_amber = amber_message
+                                st.session_state.tuning_mode = True
+                                st.session_state.crystal_type = crystal_type
+                                
+                                status.update(label="结晶凝结完成。", state="complete", expanded=False)
+                            
+                            # 将极速共情和结晶文本一起存入历史记录
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": f"{appreciation_text}\n\n{amber_message}"
+                            })
+                            
+                            # 更新截断锚点
+                            st.session_state.last_clear_index = len(st.session_state.messages)
+                            # 重置计分板
+                            st.session_state.heartflow_score = 0
+                            st.session_state.consecutive_zero_turns = 0
+                            # 立即重新运行以更新UI状态
                             st.rerun()
                             
                         except Exception as e:
@@ -673,17 +717,17 @@ elif st.session_state.mode == "chat":
                         
                         enhanced_prompt = SOUL_OBSERVER_PROMPT
                         
-                        completion = client.chat.completions.create(
+                        stream = client.chat.completions.create(
                             model="deepseek-ai/DeepSeek-V3",
                             messages=[
                                 {"role": "system", "content": enhanced_prompt},
                                 *history,
                             ],
+                            stream=True
                         )
-                        response_text = completion.choices[0].message.content
-                        st.markdown(response_text)
+                        response_content = st.write_stream(stream)
                         st.session_state.messages.append(
-                            {"role": "assistant", "content": response_text}
+                            {"role": "assistant", "content": response_content}
                         )
                     st.rerun()
 
