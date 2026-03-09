@@ -319,19 +319,19 @@ if st.session_state.mode == "gallery":
         padding: 40px; 
         text-align: center; 
         line-height: 2.0; 
-        color: #e2e8f0; 
+        color: #1e293b; 
         font-size: 16px; 
-        background: rgba(255, 255, 255, 0.03); 
+        background: rgba(0, 0, 0, 0.02); 
         backdrop-filter: blur(16px); 
         -webkit-backdrop-filter: blur(16px); 
-        border: 1px solid rgba(255, 255, 255, 0.05); 
+        border: 1px solid rgba(0, 0, 0, 0.05); 
         border-radius: 20px; 
         box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1); 
     ">
     在这里，不需要斟酌字句，也不需要逻辑自洽。<br><br> 
     请听从你的第一直觉，<br>把自己脑海中闪过的第一个词、最荒谬的那个念头，<br>或者最无厘头的只言片语直接扔进来。<br><br> 
     越是天马行空，越能触碰真实的边界。<br><br> 
-    <span style="font-size: 14px; color: #94a3b8;">现在，推开门吧。</span> 
+    <span style="font-size: 14px; color: #64748b;">现在，推开门吧。</span> 
     </div>
     """, unsafe_allow_html=True)
     
@@ -355,13 +355,13 @@ elif st.session_state.mode == "chat":
     
     # 动态渲染标题和引导语
     if entry_path == "direct_vent":
-        st.markdown("<h3 style='text-align: center; color: #e2e8f0; font-weight: 300; letter-spacing: 2px;'>✦ 潜意识树洞 ✦</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px;'>这是一个绝对安全的空间。没有评判，没有别人，只有倾听。</p>", unsafe_allow_html=True)
-        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(255,255,255,0.2), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; color: #1e293b; font-weight: 300; letter-spacing: 2px;'>✦ 潜意识树洞 ✦</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #475569; font-size: 14px;'>这是一个绝对安全的空间。没有评判，没有别人，只有倾听。</p>", unsafe_allow_html=True)
+        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.1), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
     else:
-        st.markdown("<h3 style='text-align: center; color: #e2e8f0; font-weight: 300; letter-spacing: 2px;'>✦ 碎片解读 ✦</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 14px;'>看着墙上的碎片，聊聊它唤醒了你什么记忆...</p>", unsafe_allow_html=True)
-        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(255,255,255,0.2), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center; color: #1e293b; font-weight: 300; letter-spacing: 2px;'>✦ 碎片解读 ✦</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #475569; font-size: 14px;'>看着墙上的碎片，聊聊它唤醒了你什么记忆...</p>", unsafe_allow_html=True)
+        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.1), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
         
         # 换一块琥珀按钮（仅在启发模式下显示）
         if st.button("🍃 没感觉，换一块琥珀"):
