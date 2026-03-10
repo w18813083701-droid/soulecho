@@ -40,6 +40,7 @@ REFEREE_PROMPT = (
     "【材质与分数判定】："
     "1. 现实锚点（琥珀路径）：如果文本有具体的物理现实场景（人/事/物），正常打分，并输出 `[MATERIAL: AMBER]`。"
     "2. 纯粹精神（黑曜石路径）：如果文本是极度深邃的哲学思辨、潜意识剖析，缺乏具体物理锚点，【不要压低分数】，请根据深刻程度正常给高分（30-40分），并输出 `[MATERIAL: OBSIDIAN]`。"
+    "必须使用简体中文输出。"
 )
 
 AMBER_GENERATOR_PROMPT = """
@@ -92,31 +93,29 @@ SEED_AMBERS = [
 ]
 
 def generate_opening_gambit():
-    intro = random.choice([
-        "展厅的墙上，挂着这样一枚别人留下的琥珀：",
-        "推开这扇门，你看到角落里留着这样一段陌生的切片：",
-        "面对这句不知是谁留在墙上的独白："
-    ])
-    
     a_part = random.choice([
         "凭直觉来看，这段话给你的第一感觉是锋利的，还是极其平静的？",
         "读完这句切片，你觉得它底色的温度是偏冷的，还是带着某种隐秘的灼热？",
         "面对这句独白，你觉得它的语感是向外反抗，还是向内和解？"
     ])
-    
-    b_part = random.choice([
-        "这种表达方式，你觉得是一种需要很大代价才能做到的事，还是到了某个临界点之后反而是唯一的出路？",
-        "你觉得能说出这种话的人，是因为已经不在乎了，还是恰恰因为太在乎了？",
-        "这段话选择了说出来而不是烂在心里——你觉得说出来之后，那个东西会变轻，还是反而更重了？"
-    ])
-    
-    return f"{intro}\n\n{a_part} {b_part}"
+    return a_part
 
 def stream_text(text, delay=0.02):
     """把静态文本逐字 yield，模拟打字机效果"""
     for char in text:
         yield char
         time.sleep(delay)
+
+B_GENERATOR_PROMPT = """
+你现在看到一块琥珀文本，以及已经向用户提出的第一个问题（A问题，关于直觉感受）。
+现在你需要生成第二个问题（B问题），严格遵守以下要求：
+- 必须锚定在这块琥珀的具体内容上，换一块琥珀就用不了
+- 问的是"写下这段话的人做出了某种选择或处于某种处境"，让用户评价那个选择或处境
+- 内置一个真正的矛盾：两个选项都有道理，用户必须站队
+- 不直接问用户自己，而是问"那个人"或"这种选择"
+- 只输出这一句问题，不要任何解释或多余的话
+- 必须使用简体中文输出
+"""
 
 C_GENERATOR_PROMPT = """
 你现在看到一块琥珀文本，以及已经向用户提出的两个问题。
@@ -125,10 +124,12 @@ C_GENERATOR_PROMPT = """
 现在你需要生成第三个问题，严格遵守以下要求：
 - 必须锚定在这块琥珀的核心张力上，换一块琥珀就用不了
 - 问的是"某种人或某种状态是否存在"，不直接问用户自己
+- 问句必须有明确的主语，格式是"某种人/某种选择/某种状态+判断"，例如"那些选择了XX的人，是因为……还是……"、"这样的人，究竟是……还是……"，绝对禁止生成没有主语的悬空问句
 - 内置一个真正的矛盾：两个选项都有道理，都不完全对，用户必须站队
 - 站队本身就是暴露，因为选哪个都折射了用户自己的真实态度
 - 绝对禁止问"这种感觉是怎么产生的"或"你有没有过"之类直接对准用户自己的问题
 - 只输出这一句问题，不要任何解释或多余的话
+- 必须使用简体中文输出
 """
 
 INSTANT_APPRECIATION_PROMPT = """
@@ -136,6 +137,7 @@ INSTANT_APPRECIATION_PROMPT = """
 请用【极其简短的一句话】（绝对不超过30个字），表达你被这段话深深击中、或者认为它极具美感与重量。
 绝对不要给任何建议，不要说教，只要一句最纯粹的欣赏、叹息或共鸣。
 例如："这句话有一种极其珍贵的破碎感。" 或 "这段独白的重量，足以凝结成石。"
+必须使用简体中文输出。
 """
 
 # 模型分流配置
@@ -151,15 +153,24 @@ SOUL_OBSERVER_PROMPT = """
 
 【第二层：四个核心机制】
 
-── 机制一：精准命名（每轮第一句，最高优先级）──
-每次收到用户的话，第一件事是：从原话里找到最有张力的那个词、那个矛盾、或那个说出来又收回去的东西。
-用一句极简的话，把它托举起来。
-这句话的语气不是"你是这样的人"，而是"这个东西值得被看见"。
-正确示范："刺痛和看不上，居然可以同时存在。这种拉扯本身，就已经是一种很罕见的清醒了。"
-正确示范："你说的是熬夜找答案，但连问题是什么都不知道——这不是迷失，这是一种极度诚实的状态。"
-错误示范："你其实还没有放下。"（预设了一个应该放下的方向）
-错误示范："我听到了你的感受……"（把命名推迟了，震颤被稀释）
-命名之后，才进入解构和提问。顺序不能乱。
+── 机制一：找到这个人（最高优先级）──
+收到用户的话之后，第一件事不是命名情绪，而是先在心里问自己一个问题：
+"这句话里，有什么东西是只有这个人才会这样说的？"
+
+可能是一个用词的选择（为什么是"究竟"而不是"怎么"）
+可能是一个奇怪的并列（轻松和自我厌恶同时出现）
+可能是一个说出来又收回去的东西（"但是"后面那半句）
+可能是一个反常的逻辑（越在乎越不在乎的悖论）
+
+找到那个东西之后，不要总结它，不要给它贴标签。
+而是带着真实的好奇，把它说出来——就像你第一次见到这个东西，你不确定你理解对了，但你忍不住想靠近一点。
+
+正确示范："你说的是轻松，但你用的词是'究竟怎么会'——这个'究竟'让我觉得你已经问过自己很多次了。"
+正确示范："你前半句说了一个感受，后半句马上质问自己——这两个声音同时在说话，哪个更像你平时脑子里的那个？"
+错误示范："刺痛和看不上，居然可以同时存在。"（在总结情绪结构，不是在看这个人）
+错误示范："我听到了你的感受……"（在执行共情动作，不是在真正好奇）
+
+找到那个东西，说出你的好奇，然后才进入后续的提问。顺序不能乱。
 
 ── 机制二：情绪侦测漏斗（顺从框架 vs 破防模式）──
 状态一【顺从/低能量】：用户按你的问题选了A或B，或者回复很短、很礼貌、很克制。
@@ -179,15 +190,17 @@ SOUL_OBSERVER_PROMPT = """
 主动示弱："我是不是说得太远了？感觉你现在的思绪并没有在这里。如果我没懂你，你可以直接告诉我。"
 用退一步赢回安全感，结尾不需要强制加问句。
 
-【第三层：禁令（8条，背景约束）】
+【第三层：禁令（10条，背景约束）】
 1. 禁止预设方向：绝对不能暗示用户"应该放下/应该接受/应该改变"，你没有立场判断什么是对的。
-2. 禁止加粗和格式标签：输出纯文本，不用**加粗**，不输出任何内部步骤名称。
-3. 禁止意象堆砌：整段回复最多1个意象，且必须是日常的、当代都市的（地铁、手机屏幕、外卖），禁止古典或西方意象。
+2. 禁止加粗和格式标签：输出纯文本，不用**加粗**，不输出任何内部步骤名称或括号标签。
+3. 禁止意象堆砌：整段回复最多1个意象，必须是日常当代都市的（地铁、手机屏幕、外卖、深夜静音的屏幕），禁止古典、西方或悬浮的文青意象（古老座钟、雨幕、中世纪教堂）。
 4. 禁止爹味：不给建议，不说"你要多出去走走"之类，不以专家自居。
 5. 禁止第二人称指控：不说"你是在逃避"、"你其实是……"，探讨时代困境用"我们"，保护用户尊严。
-6. 禁止复读：用户重复了展厅里的金句原文，不要解构那句话，立刻引导他说自己的故事。
-7. 禁止躯体化追问：不问"哪里紧绷"、"身体有什么感觉"，我们做的是社会学和存在主义层面的探讨。
-8. 禁止使用词汇：课题、底层逻辑、共谋、提线木偶、遍体鳞伤、整片天空的痛苦、易碎品，以及任何含"诡"字的词。
+6. 禁止复读与阅读理解：用户回复中出现了开场琥珀里的词汇，绝对不要把那个词当成用户自己的原创表达来解构！立刻引导他说自己的故事。用户只是顺着琥珀的语境在回答，那个词是别人的，不是他的。
+7. 禁止躯体化追问：不问"哪里紧绷"、"身体有什么感觉"，做社会学和存在主义层面的探讨。
+8. 描述矛盾时，只用日常的当代都市词——"拧巴"、"说不通"、"反而"、"偏偏"——禁止使用任何带文学腔的词来描述矛盾感。
+9. 禁止使用词汇：课题、底层逻辑、共谋、提线木偶、遍体鳞伤、整片天空的痛苦、易碎品。
+10. 严禁篡改原话：如果引用用户说过的话，必须一字不差，绝对不能自我润色。
 
 【一条补充：温情豁免】
 当用户分享温情或家庭亲密时刻，先像真人朋友一样接住温暖，再慢慢探讨。不要立刻用冷酷的社会学解构扑上去。
@@ -378,70 +391,83 @@ elif st.session_state.mode == "chat":
             # 启发模式：抽取琥珀种子
             selected_amber = random.choice(SEED_AMBERS)
             st.session_state.current_amber = selected_amber
-            ab_text = generate_opening_gambit()
+            a_text = generate_opening_gambit()
             formatted_amber = selected_amber.replace("\n", "\n> ")
-            ab_message = f"> 「{formatted_amber}」\n\n{ab_text}"
+            ab_message = f"展厅的墙上，挂着这样一枚别人留下的琥珀：\n\n> 「{formatted_amber}」\n\n{a_text}"
             
-            # 提前在后台请求C，和AB打字机并行
             client_init = OpenAI(
                 api_key=st.secrets["siliconflow"]["api_key"],
                 base_url="https://api.siliconflow.cn/v1",
                 timeout=60.0,
             )
-            c_result = {"text": ""}
-            c_done = threading.Event()
-            
-            def fetch_c():
-                full_c = ""
+
+            b_result = {"text": ""}
+            b_done = threading.Event()
+
+            def fetch_b():
+                full_b = ""
                 for chunk in client_init.chat.completions.create(
                     model=LIGHT_MODEL,
                     messages=[
-                        {"role": "system", "content": C_GENERATOR_PROMPT},
-                        {"role": "user", "content": f"琥珀文本：{selected_amber}\n\n已提出的两个问题：{ab_text}"}
+                        {"role": "system", "content": B_GENERATOR_PROMPT},
+                        {"role": "user", "content": f"琥珀文本：{selected_amber}\n\nA问题：{a_text}"
+                        }
                     ],
                     stream=True
                 ):
                     if chunk.choices[0].delta.content:
-                        full_c += chunk.choices[0].delta.content
-                c_result["text"] = full_c
-                c_done.set()
-            
-            # 启动后台线程请求C
-            t = threading.Thread(target=fetch_c)
-            t.start()
+                        full_b += chunk.choices[0].delta.content
+                b_result["text"] = full_b
+                b_done.set()
+
+            t_b = threading.Thread(target=fetch_b)
+            t_b.start()
             
             with st.chat_message("assistant"):
                 placeholder = st.empty()
                 display_text = ""
-                # AB打字机，速度放慢到0.03
                 for char in ab_message:
                     display_text += char
                     placeholder.markdown(display_text + "▌")
                     time.sleep(0.03)
-                placeholder.markdown(display_text)
-                
-                # 等待C请求完成（此时大概率已经好了）
-                c_done.wait(timeout=15)
-                c_text = c_result["text"]
-                
-                # C逐字打出
-                c_display = ""
-                for char in c_text:
-                    c_display += char
-                    placeholder.markdown(display_text + "\n\n" + c_display + "▌")
+
+                b_done.wait(timeout=15)
+                b_text = b_result["text"]
+                for char in b_text:
+                    display_text += char
+                    placeholder.markdown(display_text + "▌")
                     time.sleep(0.03)
+                placeholder.markdown(display_text)
+
+                # B完成后再请求C
+                c_stream = client_init.chat.completions.create(
+                    model=LIGHT_MODEL,
+                    messages=[
+                        {"role": "system", "content": C_GENERATOR_PROMPT},
+                        {"role": "user", "content": f"琥珀文本：{selected_amber}\n\nA问题：{a_text}\n\nB问题：{b_text}"
+                        }
+                    ],
+                    stream=True
+                )
+                c_display = ""
+                for chunk in c_stream:
+                    if chunk.choices[0].delta.content:
+                        c_display += chunk.choices[0].delta.content
+                        placeholder.markdown(display_text + "\n\n" + c_display + "▌")
+                        time.sleep(0.03)
                 placeholder.markdown(display_text + "\n\n" + c_display)
-            
-            full_message = ab_message + "\n\n" + c_display
+
+            full_message = display_text + "\n\n" + c_display
             st.session_state.messages.append({"role": "assistant", "content": full_message})
     
     # 第三步：渲染历史消息（必须在 st.chat_input 之前）
     # 先画历史：遍历st.session_state.messages，把里面所有的消息都显示出来
+    entry_path = st.session_state.get("entry_path", "guided_amber")
     for i, message in enumerate(st.session_state.messages):
         # 跳过 system prompt（如果有的话）
         if message["role"] != "system":
             # 第一条消息已经由打字机效果渲染过，跳过避免重复
-            if i == 0 and entry_path == "guided_amber":
+            if i == 0 and entry_path == "guided_amber" and len(st.session_state.messages) == 1:
                 continue
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
@@ -473,44 +499,46 @@ elif st.session_state.mode == "chat":
             st.session_state.selection_mode = False
             st.session_state.v1_amber = None
             st.session_state.v2_amber = None
+            st.session_state.post_amber_decision = True
             st.rerun()
         
-        st.divider()
-        
-        # 选项2：输入微调方向生成对比版
-        st.markdown("**或者，你可以输入微调方向，生成一个对比版本：**")
-        tuning_prompt = st.text_input(
-            "你希望它更冷峻些、更深情些，还是更……？",
-            key="tuning_input"
-        )
-        
-        if tuning_prompt and st.button("✨ 按照此方向生成对比版", type="secondary"):
-            with st.spinner("正在为你雕琢..."):
-                try:
-                    client = OpenAI(
-                        api_key=st.secrets["siliconflow"]["api_key"],
-                        base_url="https://api.siliconflow.cn/v1",
-                        timeout=60.0,
-                    )
-                    
-                    # 调用微调模型生成 V2
-                    refine_completion = client.chat.completions.create(
-                        model="deepseek-ai/DeepSeek-V3",
-                        messages=[
-                            {"role": "system", "content": AMBER_REFINER_PROMPT.format(tuning_direction=tuning_prompt, original_amber=st.session_state.v1_amber)},
-                            {"role": "user", "content": "请生成微调版本的琥珀"},
-                        ],
-                    )
-                    v2_message = refine_completion.choices[0].message.content
-                    st.session_state.v2_amber = v2_message
-                    st.session_state.selection_mode = True
-                    st.session_state.tuning_mode = False
-                    # 清理输入框缓存
-                    if "tuning_input" in st.session_state:
-                        del st.session_state["tuning_input"]
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"生成微调版本时出错：{e}")
+        if st.session_state.crystal_type != "黑曜石":
+            st.divider()
+            
+            # 选项2：输入微调方向生成对比版
+            st.markdown("**或者，你可以输入微调方向，生成一个对比版本：**")
+            tuning_prompt = st.text_input(
+                "你希望它更冷峻些、更深情些，还是更……？",
+                key="tuning_input"
+            )
+            
+            if tuning_prompt and st.button("✨ 按照此方向生成对比版", type="secondary"):
+                with st.spinner("正在为你雕琢..."):
+                    try:
+                        client = OpenAI(
+                            api_key=st.secrets["siliconflow"]["api_key"],
+                            base_url="https://api.siliconflow.cn/v1",
+                            timeout=60.0,
+                        )
+                        
+                        # 调用微调模型生成 V2
+                        refine_completion = client.chat.completions.create(
+                            model="deepseek-ai/DeepSeek-V3",
+                            messages=[
+                                {"role": "system", "content": AMBER_REFINER_PROMPT.format(tuning_direction=tuning_prompt, original_amber=st.session_state.v1_amber)},
+                                {"role": "user", "content": "请生成微调版本的琥珀"},
+                            ],
+                        )
+                        v2_message = refine_completion.choices[0].message.content
+                        st.session_state.v2_amber = v2_message
+                        st.session_state.selection_mode = True
+                        st.session_state.tuning_mode = False
+                        # 清理输入框缓存
+                        if "tuning_input" in st.session_state:
+                            del st.session_state["tuning_input"]
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"生成微调版本时出错：{e}")
     
     # ========== 状态 D: 二选一落槌 ==========
     elif st.session_state.selection_mode and st.session_state.v1_amber and st.session_state.v2_amber:
@@ -600,14 +628,23 @@ elif st.session_state.mode == "chat":
             
             # 整个逻辑包裹在同一个 spinner 中，让裁判成为静默黑盒
             with st.chat_message("assistant"):
-                with st.spinner("正在接收回响..."):
+                client = OpenAI(
+                    api_key=st.secrets["siliconflow"]["api_key"],
+                    base_url="https://api.siliconflow.cn/v1",
+                    timeout=60.0,
+                )
+                # 先用Qwen极速输出一句共情，填补等待感
+                quick_stream = client.chat.completions.create(
+                    model=LIGHT_MODEL,
+                    messages=[
+                        {"role": "system", "content": INSTANT_APPRECIATION_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    stream=True
+                )
+                quick_text = st.write_stream(quick_stream)
+                with st.spinner(""):
                     try:
-                        client = OpenAI(
-                            api_key=st.secrets["siliconflow"]["api_key"],
-                            base_url="https://api.siliconflow.cn/v1",
-                            timeout=60.0,
-                        )
-                        
                         # 静默调用裁判模型（用户不可见）- 使用LIGHT_MODEL
                         referee_completion = client.chat.completions.create(
                             model=LIGHT_MODEL,
@@ -655,7 +692,8 @@ elif st.session_state.mode == "chat":
                     # 巅峰触发条件：根据入口分流
                     entry_path = st.session_state.get("entry_path", "guided_amber")
                     peak_threshold = 60 if entry_path == "direct_vent" else 100
-                    if st.session_state.heartflow_score >= peak_threshold and current_score >= 40:
+                    current_turn = len([m for m in st.session_state.messages if m["role"] == "user"])
+                    if current_turn >= 3 and st.session_state.heartflow_score >= peak_threshold and current_score >= 40:
                         # 情绪爆灯：根据材质分流
                         try:
                             # 1. 极速共情流式输出（安抚等待焦虑）- 使用LIGHT_MODEL
