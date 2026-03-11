@@ -280,6 +280,12 @@ if "post_amber_decision" not in st.session_state:
 if "crystal_type" not in st.session_state:
     st.session_state.crystal_type = "琥珀"
 
+if "last_user_prompt" not in st.session_state:
+    st.session_state.last_user_prompt = None
+
+if "initial_assistant_message" not in st.session_state:
+    st.session_state.initial_assistant_message = None
+
 generate_report_clicked = False
 
 with st.sidebar:
@@ -458,17 +464,12 @@ elif st.session_state.mode == "chat":
                 placeholder.markdown(display_text + "\n\n" + c_display)
 
             full_message = display_text + "\n\n" + c_display
-            st.session_state.messages.append({"role": "assistant", "content": full_message})
+            st.session_state.initial_assistant_message = full_message
     
     # 第三步：渲染历史消息（必须在 st.chat_input 之前）
     # 先画历史：遍历st.session_state.messages，把里面所有的消息都显示出来
-    entry_path = st.session_state.get("entry_path", "guided_amber")
-    for i, message in enumerate(st.session_state.messages):
-        # 跳过 system prompt（如果有的话）
+    for message in st.session_state.messages:
         if message["role"] != "system":
-            # 第一条消息已经由打字机效果渲染过，跳过避免重复
-            if i == 0 and entry_path == "guided_amber" and len(st.session_state.messages) == 1:
-                continue
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
     
@@ -612,22 +613,38 @@ elif st.session_state.mode == "chat":
         
         # 正常聊天输入
         elif prompt := st.chat_input("说点什么..."):
+            # 将初始消息加入 messages
+            if st.session_state.get("initial_assistant_message"):
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": st.session_state.initial_assistant_message
+                })
+                st.session_state.initial_assistant_message = None
+            
+            # 加入用户消息
             st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # 防复读物理拦截机制
-            if len(st.session_state.messages) > 0:
-                first_msg = st.session_state.messages[0]["content"]
-                # 如果用户输入长度大于10，且内容完全包含在第一条引导语中
-                if len(prompt.strip()) > 10 and prompt.strip() in first_msg:
-                    parrot_reply = "这是别人留下的碎片。比起这块已经凝固的琥珀，我更想听听，它唤醒了你记忆里的哪个具体画面？"
-                    st.session_state.messages.append({"role": "assistant", "content": parrot_reply})
-                    st.rerun()
-            
-            # 整个逻辑包裹在同一个 spinner 中，让裁判成为静默黑盒
-            with st.chat_message("assistant"):
+            # 暂存输入，用于生成回复
+            st.session_state.last_user_prompt = prompt
+            st.rerun()
+
+# AI 回复生成（检查 last_user_prompt）
+if st.session_state.last_user_prompt:
+    user_input = st.session_state.last_user_prompt
+    
+    # 防复读物理拦截机制
+    is_parrot = False
+    if len(st.session_state.messages) > 0:
+        first_msg = st.session_state.messages[0]["content"]
+        if len(user_input.strip()) > 10 and user_input.strip() in first_msg:
+            is_parrot = True
+            parrot_reply = "这是别人留下的碎片。比起这块已经凝固的琥珀，我更想听听，它唤醒了你记忆里的哪个具体画面？"
+            st.session_state.messages.append({"role": "assistant", "content": parrot_reply})
+            st.session_state.last_user_prompt = None
+    
+    if not is_parrot:
+        # 整个逻辑包裹在同一个 spinner 中
+        with st.chat_message("assistant"):
+            with st.spinner("✨ 正在回响..."):
                 client = OpenAI(
                     api_key=st.secrets["siliconflow"]["api_key"],
                     base_url="https://api.siliconflow.cn/v1",
@@ -638,169 +655,166 @@ elif st.session_state.mode == "chat":
                     model=LIGHT_MODEL,
                     messages=[
                         {"role": "system", "content": INSTANT_APPRECIATION_PROMPT},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": user_input}
                     ],
                     stream=True
                 )
                 quick_text = st.write_stream(quick_stream)
-                with st.spinner(""):
+
+                try:
+                    # 静默调用裁判模型（用户不可见）- 使用LIGHT_MODEL
+                    referee_completion = client.chat.completions.create(
+                        model=LIGHT_MODEL,
+                        messages=[
+                            {"role": "system", "content": REFEREE_PROMPT},
+                            {"role": "user", "content": user_input},
+                        ],
+                    )
+                    referee_result = referee_completion.choices[0].message.content
+                    
+                    # 解析 [SCORE: XX] 格式
+                    import re
+                    score_match = re.search(r'\[SCORE:\s*(\d+)\]', referee_result)
+                    if score_match:
+                        current_score = int(score_match.group(1))
+                    else:
+                        current_score = 0
+                    
+                    # 解析 [MATERIAL: AMBER/OBSIDIAN] 格式
+                    material_match = re.search(r'\[MATERIAL:\s*(\w+)\]', referee_result, re.IGNORECASE)
+                    if material_match:
+                        current_material = material_match.group(1).upper()
+                    else:
+                        current_material = "AMBER"
+                    
+                    # 蓄水池逻辑：连续废话检测与风化惩罚
+                    if current_score == 0:
+                        st.session_state.consecutive_zero_turns += 1
+                    else:
+                        st.session_state.consecutive_zero_turns = 0
+                    
+                    # 风化惩罚：连续2轮废话扣1分（最低0分）
+                    if st.session_state.consecutive_zero_turns >= 2:
+                        st.session_state.heartflow_score = max(0, st.session_state.heartflow_score - 1)
+                        st.session_state.consecutive_zero_turns = 0
+                    
+                    # 累加当前得分到蓄水池
+                    st.session_state.heartflow_score += current_score
+                    
+                except Exception as e:
+                    # 裁判调用失败，默认继续正常对话
+                    current_score = 0
+                
+                # 巅峰触发条件：根据入口分流
+                entry_path = st.session_state.get("entry_path", "guided_amber")
+                peak_threshold = 60 if entry_path == "direct_vent" else 100
+                current_turn = len([m for m in st.session_state.messages if m["role"] == "user"])
+                if current_turn >= 3 and st.session_state.heartflow_score >= peak_threshold and current_score >= 40:
+                    # 情绪爆灯：根据材质分流
                     try:
-                        # 静默调用裁判模型（用户不可见）- 使用LIGHT_MODEL
-                        referee_completion = client.chat.completions.create(
+                        # 1. 极速共情流式输出（安抚等待焦虑）- 使用LIGHT_MODEL
+                        appreciation_stream = client.chat.completions.create(
                             model=LIGHT_MODEL,
                             messages=[
-                                {"role": "system", "content": REFEREE_PROMPT},
-                                {"role": "user", "content": prompt},
-                            ],
-                        )
-                        referee_result = referee_completion.choices[0].message.content
-                        
-                        # 解析 [SCORE: XX] 格式
-                        import re
-                        score_match = re.search(r'\[SCORE:\s*(\d+)\]', referee_result)
-                        if score_match:
-                            current_score = int(score_match.group(1))
-                        else:
-                            current_score = 0
-                        
-                        # 解析 [MATERIAL: AMBER/OBSIDIAN] 格式
-                        material_match = re.search(r'\[MATERIAL:\s*(\w+)\]', referee_result, re.IGNORECASE)
-                        if material_match:
-                            current_material = material_match.group(1).upper()
-                        else:
-                            current_material = "AMBER"
-                        
-                        # 蓄水池逻辑：连续废话检测与风化惩罚
-                        if current_score == 0:
-                            st.session_state.consecutive_zero_turns += 1
-                        else:
-                            st.session_state.consecutive_zero_turns = 0
-                        
-                        # 风化惩罚：连续2轮废话扣1分（最低0分）
-                        if st.session_state.consecutive_zero_turns >= 2:
-                            st.session_state.heartflow_score = max(0, st.session_state.heartflow_score - 1)
-                            st.session_state.consecutive_zero_turns = 0
-                        
-                        # 累加当前得分到蓄水池
-                        st.session_state.heartflow_score += current_score
-                        
-                    except Exception as e:
-                        # 裁判调用失败，默认继续正常对话
-                        current_score = 0
-                        reason = f"裁判调用失败: {e}"
-                    
-                    # 巅峰触发条件：根据入口分流
-                    entry_path = st.session_state.get("entry_path", "guided_amber")
-                    peak_threshold = 60 if entry_path == "direct_vent" else 100
-                    current_turn = len([m for m in st.session_state.messages if m["role"] == "user"])
-                    if current_turn >= 3 and st.session_state.heartflow_score >= peak_threshold and current_score >= 40:
-                        # 情绪爆灯：根据材质分流
-                        try:
-                            # 1. 极速共情流式输出（安抚等待焦虑）- 使用LIGHT_MODEL
-                            appreciation_stream = client.chat.completions.create(
-                                model=LIGHT_MODEL,
-                                messages=[
-                                    {"role": "system", "content": INSTANT_APPRECIATION_PROMPT},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                stream=True
-                            )
-                            appreciation_text = st.write_stream(appreciation_stream)
-                            
-                            # 2. 潜意识状态栏（滚动字幕）- 使用MASTER_MODEL
-                            with st.status("✨ 正在潜入潜意识深处...", expanded=True) as status:
-                                st.write("正在为你提取原石...")
-                                
-                                # 根据材质选择对应的生成器
-                                if current_material == "OBSIDIAN":
-                                    # 黑曜石路径
-                                    refiner_prompt = OBSIDIAN_REFINER_PROMPT
-                                    crystal_type = "黑曜石"
-                                else:
-                                    # 琥珀路径（默认）
-                                    refiner_prompt = AMBER_GENERATOR_PROMPT
-                                    crystal_type = "琥珀"
-                                
-                                # 调用生成器生成 V1 - 使用MASTER_MODEL
-                                amber_completion = client.chat.completions.create(
-                                    model=MASTER_MODEL,
-                                    messages=[
-                                        {"role": "system", "content": refiner_prompt},
-                                        {"role": "user", "content": prompt},
-                                    ],
-                                    stream=True
-                                )
-                                amber_message = st.write_stream(amber_completion)
-                
-                                st.write("正在打磨结晶形态...")
-                                
-                                # 状态 A: 生成 V1，进入微调模式
-                                st.session_state.v1_amber = amber_message
-                                st.session_state.tuning_mode = True
-                                st.session_state.crystal_type = crystal_type
-                                
-                                status.update(label="结晶凝结完成。", state="complete", expanded=False)
-                            
-                            # 将极速共情和结晶文本一起存入历史记录
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": f"{appreciation_text}\n\n{amber_message}"
-                            })
-                            
-                            # 更新截断锚点
-                            st.session_state.last_clear_index = len(st.session_state.messages)
-                            # 重置计分板
-                            st.session_state.heartflow_score = 0
-                            st.session_state.consecutive_zero_turns = 0
-                            # 立即重新运行以更新UI状态
-                            st.rerun()
-                            
-                        except Exception as e:
-                            # 琥珀生成失败，使用默认安抚话术
-                            comfort_message = "你的恶心就是最好的防御。这块原石已经足够漂亮，我们停在这个最干净的句号上，好吗？"
-                            st.markdown(comfort_message)
-                            st.session_state.messages.append(
-                                {"role": "assistant", "content": comfort_message}
-                            )
-                            # 添加视觉分割线
-                            st.session_state.messages.append(
-                                {"role": "assistant", "content": "—— ✦ 风已停息，这一页已凝结成琥珀。我们带着新的空白，继续往前走吧。 ✦ ——"}
-                            )
-                            # 更新截断锚点
-                            st.session_state.last_clear_index = len(st.session_state.messages)
-                            # 重置计分板
-                            st.session_state.heartflow_score = 0
-                            st.session_state.consecutive_zero_turns = 0
-                            # 立即重新运行以更新UI状态
-                            st.rerun()
-                    else:
-                        # 情绪铺垫中：走原有对话逻辑
-                        # 从截断锚点开始切片，只发送最新对话给大模型
-                        recent_messages = st.session_state.messages[st.session_state.last_clear_index:]
-                        history = [
-                            {
-                                "role": message["role"],
-                                "content": message["content"],
-                            }
-                            for message in recent_messages
-                            if message["role"] in ("user", "assistant")
-                        ]
-                        
-                        enhanced_prompt = SOUL_OBSERVER_PROMPT
-                        
-                        stream = client.chat.completions.create(
-                            model="deepseek-ai/DeepSeek-V3",
-                            messages=[
-                                {"role": "system", "content": enhanced_prompt},
-                                *history,
+                                {"role": "system", "content": INSTANT_APPRECIATION_PROMPT},
+                                {"role": "user", "content": user_input}
                             ],
                             stream=True
                         )
-                        response_content = st.write_stream(stream)
+                        appreciation_text = st.write_stream(appreciation_stream)
+                        
+                        # 2. 潜意识状态栏（滚动字幕）- 使用MASTER_MODEL
+                        with st.status("✨ 正在潜入潜意识深处...", expanded=True) as status:
+                            st.write("正在为你提取原石...")
+                            
+                            # 根据材质选择对应的生成器
+                            if current_material == "OBSIDIAN":
+                                # 黑曜石路径
+                                refiner_prompt = OBSIDIAN_REFINER_PROMPT
+                                crystal_type = "黑曜石"
+                            else:
+                                # 琥珀路径（默认）
+                                refiner_prompt = AMBER_GENERATOR_PROMPT
+                                crystal_type = "琥珀"
+                            
+                            # 调用生成器生成 V1 - 使用MASTER_MODEL
+                            amber_completion = client.chat.completions.create(
+                                model=MASTER_MODEL,
+                                messages=[
+                                    {"role": "system", "content": refiner_prompt},
+                                    {"role": "user", "content": user_input},
+                                ],
+                                stream=True
+                            )
+                            amber_message = st.write_stream(amber_completion)
+            
+                            st.write("正在打磨结晶形态...")
+                            
+                            # 状态 A: 生成 V1，进入微调模式
+                            st.session_state.v1_amber = amber_message
+                            st.session_state.tuning_mode = True
+                            st.session_state.crystal_type = crystal_type
+                            
+                            status.update(label="结晶凝结完成。", state="complete", expanded=False)
+                        
+                        # 将极速共情和结晶文本一起存入历史记录
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": f"{appreciation_text}\n\n{amber_message}"
+                        })
+                        
+                        # 更新截断锚点
+                        st.session_state.last_clear_index = len(st.session_state.messages)
+                        # 重置计分板
+                        st.session_state.heartflow_score = 0
+                        st.session_state.consecutive_zero_turns = 0
+                        
+                    except Exception as e:
+                        # 琥珀生成失败，使用默认安抚话术
+                        comfort_message = "你的恶心就是最好的防御。这块原石已经足够漂亮，我们停在这个最干净的句号上，好吗？"
+                        st.markdown(comfort_message)
                         st.session_state.messages.append(
-                            {"role": "assistant", "content": response_content}
+                            {"role": "assistant", "content": comfort_message}
                         )
-                    st.rerun()
+                        # 添加视觉分割线
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": "—— ✦ 风已停息，这一页已凝结成琥珀。我们带着新的空白，继续往前走吧。 ✦ ——"}
+                        )
+                        # 更新截断锚点
+                        st.session_state.last_clear_index = len(st.session_state.messages)
+                        # 重置计分板
+                        st.session_state.heartflow_score = 0
+                        st.session_state.consecutive_zero_turns = 0
+                else:
+                    # 情绪铺垫中：走原有对话逻辑
+                    # 从截断锚点开始切片，只发送最新对话给大模型
+                    recent_messages = st.session_state.messages[st.session_state.last_clear_index:]
+                    history = [
+                        {
+                            "role": message["role"],
+                            "content": message["content"],
+                        }
+                        for message in recent_messages
+                        if message["role"] in ("user", "assistant")
+                    ]
+                    
+                    enhanced_prompt = SOUL_OBSERVER_PROMPT
+                    
+                    stream = client.chat.completions.create(
+                        model="deepseek-ai/DeepSeek-V3",
+                        messages=[
+                            {"role": "system", "content": enhanced_prompt},
+                            *history,
+                        ],
+                        stream=True
+                    )
+                    response_content = st.write_stream(stream)
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": response_content}
+                    )
+    
+    # 清除暂存的用户输入
+    st.session_state.last_user_prompt = None
 
 if generate_report_clicked:
     # 检查聊天记录长度：需要至少5个完整对话回合（用户+AI各5次，加上初始问候）
