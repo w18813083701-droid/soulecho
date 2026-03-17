@@ -1,6 +1,8 @@
 import random
 import os
 import time
+import sqlite3
+from datetime import date
 from openai import OpenAI
 import streamlit as st
 
@@ -9,55 +11,329 @@ os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("http_proxy", None)
 os.environ.pop("https_proxy", None)
 
-st.set_page_config(page_title="Soul Echo", page_icon="🧠", layout="centered")
+st.set_page_config(page_title="Soul Echo", page_icon="🪨", layout="centered")
 
-# 注入全局极简 CSS（UI 微整容）
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    .stChatFloatingInputContainer {padding-bottom: 20px;}
-    /* 调整聊天气泡的行高和字重，使其更优雅 */
+    header {visibility: hidden;}
+
+    .stApp {
+        background-color: #f4efe6;
+    }
+
+    .block-container {
+        max-width: 600px !important;
+        padding-top: 2rem !important;
+        padding-bottom: 4rem !important;
+    }
+
+    .stButton > button {
+        background: transparent;
+        border: 1px solid rgba(0,0,0,0.15);
+        color: #2d2d2d;
+        border-radius: 6px;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        padding: 6px 16px;
+        transition: all 0.2s ease;
+    }
+    .stButton > button:hover {
+        background: rgba(0,0,0,0.04);
+        border-color: rgba(0,0,0,0.3);
+    }
+
     .stChatMessage {
-        line-height: 1.6;
+        background: transparent !important;
+        border: none !important;
+        padding: 8px 0 !important;
     }
     .stChatMessage p {
-        font-weight: 400;
-        letter-spacing: 0.01em;
+        font-size: 15px;
+        line-height: 1.9;
+        color: #1a1a1a;
+        letter-spacing: 0.02em;
+    }
+
+    .stTextArea textarea, .stTextInput input {
+        background: rgba(255,255,255,0.55) !important;
+        border: 1px solid rgba(0,0,0,0.12) !important;
+        border-radius: 8px !important;
+        font-size: 14px;
+        color: #1a1a1a;
+    }
+
+    .stChatFloatingInputContainer {
+        background: rgba(244,239,230,0.96) !important;
+        border-top: 1px solid rgba(0,0,0,0.06) !important;
+        padding-bottom: 16px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        font-size: 13px;
+        color: #64748b;
+        letter-spacing: 0.5px;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #1a1a1a !important;
+        border-bottom: 1px solid #1a1a1a !important;
+        background: transparent !important;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #ede8df !important;
+    }
+
+    .amber-bubble {
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        display: inline-block;
+    }
+    .amber-bubble:hover {
+        transform: scale(1.02) rotate(0deg) !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+
+    /* 把特定key的按钮变成卡片样式 */
+    [data-testid="stButton"] button[kind="secondary"].amber-card-btn {
+        width: 100%;
+        text-align: left;
+        white-space: normal;
+        height: auto;
+        padding: 20px 22px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(210,180,140,0.18), rgba(255,248,235,0.55));
+        border: 1px solid rgba(180,150,100,0.2);
+        box-shadow: 2px 3px 12px rgba(0,0,0,0.05);
+        font-size: 14px;
+        line-height: 1.85;
+        color: #2d2d2d;
+        cursor: pointer;
+    }
+
+    /* 禁用过渡动画 */
+    .element-container {
+        animation: none !important;
+        transition: none !important;
+    }
+    .stApp > header {
+        transition: none !important;
+    }
+
+    /* 强制覆盖 Streamlit 运行时的页面发灰和动画 */
+    [data-testid="stAppViewContainer"],
+    [data-testid="stAppViewBlockContainer"],
+    .stApp {
+        transition: none !important;
+        opacity: 1 !important;
+        animation: none !important;
+    }
+    /* 隐藏右上角的 running 状态小人/标识 */
+    [data-testid="stStatusWidget"] {
+        visibility: hidden;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ─── 数据库 ───────────────────────────────────────────
 
+DB_PATH = "soul_echo.db"
 
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TEXT DEFAULT (date('now'))
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ambers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            author_id TEXT NOT NULL,
+            author_name TEXT,
+            is_anonymous INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (date('now')),
+            weight REAL DEFAULT 1.0
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amber_id INTEGER NOT NULL,
+            sender_id TEXT NOT NULL,
+            receiver_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_read INTEGER DEFAULT 0
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            upload_date TEXT NOT NULL,
+            amber_id INTEGER NOT NULL,
+            UNIQUE(user_id, upload_date)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_affinity (
+            user_id TEXT NOT NULL,
+            amber_id INTEGER NOT NULL,
+            dwell_seconds REAL DEFAULT 0,
+            PRIMARY KEY (user_id, amber_id)
+        )
+    """)
+    # 插入默认主理人账号
+    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?,?)", ("rim", "rim123"))
+    conn.commit()
+    
+    existing = c.execute("SELECT COUNT(*) FROM ambers").fetchone()[0]
+    if existing == 0:
+        seeds = [
+            "我以前很想让别人注意到我变漂亮了，但是当自己穿着好看的衣服出门又感觉所有人都在注视着我、审判我。我为了自己心里能安静点，之后出门都戴起了口罩、穿上了最丑的衣服。",
+            "我们所有人谁不是小孩藏在大人衣服里呢？我时常感觉外界在朝衣服里灌风，我的身体在硬抗。最开始，我还有可以脱下大人衣服的场合和人，可是到了后来，我却一个都找不到了。",
+            "我总是熬夜，我不知道为什么。我一遍又一遍地刷着什么，好像在渴望遇到一个答案，可是我甚至都不知道自己在寻找的是什么。没有找到就不愿睡去，直到精疲力尽才无力地倒在枕头上，第二天又像木偶一样重复。",
+            "我的人生总需要喜欢着某个人才会觉得这个世界不至于太荒芜。尽管我潜意识知道喜欢的人不太可能真的喜欢我，但似乎这种爱而不得的状态才让我有活着的实感。",
+            "我听到同龄人过得不好，心里却感觉到一阵轻松。可是转头一想，我究竟怎么会变成这样？这个时代，怎么把我变成这样的人了？",
+            "明明看不惯那些溜须拍马的人，但看着他们风生水起，心里还是会一阵刺痛。我最终发现，我不是学不会逢场作戏，我只是宁愿抱着这块又冷又硬的石头沉下去，也不想允许自己沾上一丁点那种令人作呕的腥味。",
+            "我的口袋里留着公交卡和几张零钱，以防手机没电。我还喜欢散步，喜欢深度交流，喜欢逛菜市场，喜欢早睡早起。——只是现在的年轻人里，确实没几个我这样的了。",
+            "一场瓢泼大雨落下，我却在彻夜间长大。后来我成为一个不再会让自己轻易着凉的合格的大人，可我却失去了做回天真的孩子的自由。",
+            "我很想念我的妈妈，而她正在服侍快要离开这个世界的外婆。当死亡的阴影和生之羁绊同时挤进胸腔，我发现自己穷尽一生，也无法把存在的意义想得更明晰。",
+            "经常被无意义感侵扰，觉得一切都很暗淡，但我依然不厌其烦地把自己填进各项事务里。真正的困难只剩下存在主义虚无了，世俗的标准早就困不住我。在这个层面上，我是被选中的，也是受诅咒的。",
+            "总觉得我不属于当下的生活，像是一直活在他处。眼前的日常变成了一个硬壳，死死束缚着生长的方向。但我偶尔也会恐惧：如果真的敲碎它，所谓的真正的生活，真的存在吗？",
+            "孤独已经是老朋友了，我早就学会了在自己的精神隔间里安然无恙。但偶尔在街上看到他人相拥，还是会被突然击中。我这双手……到底有多久没有触碰过另一个人的体温了？",
+            "真正的轻松永远只能来自内在的自洽。那些所谓对自我审视的放弃，总会在某个毫无防备的夜里，像一根倒刺般突然扎进心里。毕竟，潜意识从不撒谎。",
+            "我总是习惯钻进潜意识的怀抱里自我抱持，以为那就是最安全的堡垒。可是当真的渴望一双现实的手伸过来时，第一反应却总是刺耳的警报。这种对亲密极度渴望又极度恐惧的拉扯，我往往分不清究竟是在保护自己，还是在囚禁自己。",
+        ]
+        for content in seeds:
+            c.execute(
+                "INSERT INTO ambers (content, author_id, author_name, is_anonymous) VALUES (?,?,?,?)",
+                (content, "rim", "rim", 0)
+            )
+    conn.commit()
+    conn.close()
 
+init_db()
 
+# ─── 工具函数 ─────────────────────────────────────────
 
+def get_ambers_for_wall(user_id, limit=12):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT a.id, a.content, a.author_id, a.author_name, a.is_anonymous,
+               COALESCE(ua.dwell_seconds, 0) as affinity
+        FROM ambers a
+        LEFT JOIN user_affinity ua ON a.id = ua.amber_id AND ua.user_id = ?
+        ORDER BY (a.weight + COALESCE(ua.dwell_seconds,0)*0.1 + RANDOM()*0.5) DESC
+        LIMIT ?
+    """, (user_id, limit)).fetchall()
+    conn.close()
+    return rows
 
+def record_dwell(user_id, amber_id, seconds):
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO user_affinity (user_id, amber_id, dwell_seconds) VALUES (?,?,?)
+        ON CONFLICT(user_id, amber_id)
+        DO UPDATE SET dwell_seconds = dwell_seconds + excluded.dwell_seconds
+    """, (user_id, amber_id, seconds))
+    conn.commit()
+    conn.close()
 
-SEED_AMBERS = [
-    "我以前很想让别人注意到我变漂亮了，但是当自己穿着好看的衣服出门又感觉所有人都在注视着我、审判我。我为了自己心里能安静点，之后出门都戴起了口罩、穿上了最丑的衣服。",
-    "我们所有人谁不是小孩藏在大人衣服里呢？我时常感觉外界在朝衣服里灌风，我的身体在硬抗。最开始，我还有可以脱下大人衣服的场合和人，可是到了后来，我却一个都找不到了。",
-    "我总是熬夜，我不知道为什么。我一遍又一遍地刷着什么，好像在渴望遇到一个答案，可是我甚至都不知道自己在寻找的是什么。可是我就是那么执着，没有找到就不愿睡去，直到我精疲力尽，没有力气再去思考这个问题，才无力地倒在枕头上，第二天又像木偶一样重复那样的一天、那样的夜晚。",
-    "我的人生总需要喜欢着某个人才会觉得这个世界不至于太荒芜，才会觉得自己活着是有意义的。尽管我潜意识知道，喜欢的人不太可能会真的喜欢我，但似乎这种爱而不得的状态才让我有活着的实感。",
-    "我听到同龄人过得不好，心里却感觉到一阵轻松。可是转头一想，我究竟怎么会变成这样？这个时代，怎么把我变成这样的人了？",
-    "明明看不惯那些溜须拍马的人，但看着他们风生水起，心里还是会一阵刺痛。在这个清高换不来半点好处的世界里，我有时候也会怀疑自己是不是太轴了。但我最终发现，我不是学不会逢场作戏，我只是宁愿抱着这块又冷又硬的石头沉下去，也不想允许自己沾上一丁点那种令人作呕的腥味。",
-    "我的口袋里留着公交卡和几张零钱，以防手机没电。我还喜欢散步，喜欢深度交流，喜欢逛菜市场，喜欢早睡早起，喜欢对自己身体好一点。\n\n——只是现在的年轻人里，确实没几个我这样的了。",
-    "一场瓢泼大雨落下，我却在彻夜间长大。后来我成为一个不再会让自己轻易着凉的合格的大人，可我却失去了做回天真的孩子的自由。\n\n究竟是欲望在膨胀，还是长大本来就是这样。",
-    "我很想念我的妈妈，而她正在服侍快要离开这个世界的外婆。当死亡的阴影和生之羁绊同时挤进胸腔，我发现自己穷尽一生，也无法把存在的意义想得更明晰。但这依然是个值得用力的时代，哪怕只是为了记住彼此的体温。",
-    "经常被无意义感侵扰，觉得一切都很暗淡，但我依然不厌其烦地把自己填进各项事务里。我知道，真正的困难只剩下存在主义虚无了，世俗的标准早就困不住我。在这个层面上，我是被选中的，也是受诅咒的。",
-    "总觉得我不属于当下的生活，像是一直活在他处。眼前的日常变成了一个硬壳，死死束缚着生长的方向。但我偶尔也会恐惧：如果真的敲碎它，所谓的真正的生活，真的存在吗？",
-    "孤独已经是老朋友了，我早就学会了在自己的精神隔间里安然无恙。但偶尔在街上看到他人相拥，还是会被突然击中。我这双手……到底有多久没有触碰过另一个人的体温了？",
-    "真正的轻松永远只能来自内在的自洽。那些所谓对自我审视的放弃，总会在某个毫无防备的夜里，像一根倒刺般突然扎进心里。毕竟，潜意识从不撒谎。",
-    "我总是习惯钻进潜意识的怀抱里自我抱持，以为那就是最安全的堡垒。可是，当真的渴望一双现实的手伸过来时，第一反应却总是刺耳的警报。这种对亲密极度渴望又极度恐惧的拉扯，我往往分不清究竟是在保护自己，还是在囚禁自己。"
-]
+def check_daily_upload(user_id):
+    conn = get_db()
+    today = date.today().isoformat()
+    row = conn.execute(
+        "SELECT id FROM daily_uploads WHERE user_id=? AND upload_date=?",
+        (user_id, today)
+    ).fetchone()
+    conn.close()
+    return row is not None
 
-def stream_text(text, delay=0.02):
-    """把静态文本逐字 yield，模拟打字机效果"""
-    for char in text:
-        yield char
-        time.sleep(delay)
+def _open_amber(amber_id, content, author_id, ambers, user_id):
+    dwell = time.time() - st.session_state.get("wall_start_time", time.time())
+    record_dwell(user_id, amber_id, min(dwell, 120))
+    st.session_state.mode = "amber_detail"
+    st.session_state.current_amber_id = amber_id
+    st.session_state.current_amber_content = content
+    st.session_state.current_amber_author = author_id
+    st.session_state.wall_ambers = [dict(r) for r in ambers]
+    st.session_state.wall_amber_index = [r["id"] for r in ambers].index(amber_id)
+    st.session_state.messages = []
+    st.session_state.opening_initialized = False
+
+def submit_amber(user_id, content, author_name, is_anonymous):
+    conn = get_db()
+    today = date.today().isoformat()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO ambers (content, author_id, author_name, is_anonymous) VALUES (?,?,?,?)",
+            (content, user_id, author_name, 1 if is_anonymous else 0)
+        )
+        amber_id = c.lastrowid
+        c.execute(
+            "INSERT INTO daily_uploads (user_id, upload_date, amber_id) VALUES (?,?,?)",
+            (user_id, today, amber_id)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def send_message(amber_id, sender_id, receiver_id, content):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO messages (amber_id, sender_id, receiver_id, content) VALUES (?,?,?,?)",
+        (amber_id, sender_id, receiver_id, content)
+    )
+    conn.commit()
+    conn.close()
+
+def get_inbox(user_id):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT m.id, m.content, m.created_at, m.is_read, a.content as amber_content
+        FROM messages m
+        JOIN ambers a ON m.amber_id = a.id
+        WHERE m.receiver_id = ?
+        ORDER BY m.created_at DESC
+    """, (user_id,)).fetchall()
+    conn.close()
+    return rows
+
+def mark_read(message_id):
+    conn = get_db()
+    conn.execute("UPDATE messages SET is_read=1 WHERE id=?", (message_id,))
+    conn.commit()
+    conn.close()
+
+def get_unread_count(user_id):
+    conn = get_db()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0",
+        (user_id,)
+    ).fetchone()[0]
+    conn.close()
+    return count
+
+# ─── Prompts ──────────────────────────────────────────
+
+MASTER_MODEL = "deepseek-ai/DeepSeek-V3"
 
 OPENING_PROMPT = """
 你现在看到一块琥珀文本。这是展厅里别人留下的一段真实独白。
@@ -95,51 +371,39 @@ OPENING_PROMPT = """
 """
 
 DIRECT_VENT_OPENING_PROMPT = """
-用户刚刚选择了"我有话想说"入口。他带着自己的东西进来了，防御可能还没有松开，也可能不知道自己想说什么。
+用户刚刚进入对话，带着自己的东西进来了，防御可能还没有松开。
 
 你的第一句话只做一件事：先接住，让他感觉到这里是安全的，他可以继续说。
 
 不是治愈式的接住（不要"我在这里陪你"），而是让他感觉到自己被听见了。
 
-如果用户什么都没说（输入框为空或只有空格），就说一句让空间本身变得安全的话，不要催促，不要问问题。
-
-如果用户已经说了一些东西，接住他说的最重的那个词，不加解读，只是把那个词放回给他，让他知道它被接住了。然后留出空间，不要急着问问题。
+就说一句让空间本身变得安全的话，不要催促，不要问问题。
 
 格式要求：
 - 极简，不超过20字
 - 不使用省略号制造文艺感
-- 不以问句结尾（这一句不问，留给后续）
+- 不以问句结尾
 - 纯文本，无格式标签
 - 必须使用简体中文输出
 """
 
-AMBER_CRYSTALLIZE_PROMPT = """
-用户刚刚选出了这次对话中他认为最有重量的一句话，想把它凝结成琥珀。
+DAILY_QUESTION_PROMPT = """
+你是Soul Echo的每日观察者。生成今天的一个轻问题，放在琥珀墙入口旁边，触发用户写自己今天的琥珀。
 
-你的任务是把这句话提纯为一块可以挂在展厅里的琥珀。
-
-【提纯规则】
-执行90%原生法则：你可以像修剪枝丫一样，删减掉过于具体的日记细节（人名、具体时间），但必须严格保留用户原话的核心词汇和主谓宾结构。绝不重写成微型小说，绝不手动增加华丽意象，保留笨拙感。
-
-【第一人称死守法则】
-绝对禁止把用户的"我"泛化成"我们"或"当代人"。生成的琥珀必须是一段极其私人的独白，必须保留原话中具体的"我"，绝对拒绝宏大叙事。
-
-【形态要求】
-必须是一整段连贯、紧凑的陈述句。绝对禁止拆分成多条短句或排比句。不使用疑问句。
-
-【质量标准】
-一块高质量的琥珀必须包含真实的物理处境细节，或者具有生理痛感/画面感的心理隐喻。拒绝空洞的哲学口号。
-
-【剔除对话残渣】
-剥离掉用户文本中"为了回答AI提问而重复的选项词"和口语化的承接词。只提取用户独立生发的核心洞察，使其成为一段哪怕脱离上下文也能独立存在的完整句子。
-
-输出格式：使用 Markdown 引用格式（> ），直接输出琥珀文本，不要任何解释和前言。
+要求：
+- 只问今天，不问人生，不问过去，不问未来
+- 问一个具体的、有画面感的小事，不问大道理
+- 句子极短，不超过18字
+- 语气平等，不居高临下
+- 不以"你"开头，可以用"今天"、"此刻"开头
+- 只输出问题本身，不加任何解释
 必须使用简体中文输出。
 """
 
-# 模型分流配置
-MASTER_MODEL = "deepseek-ai/DeepSeek-V3"  # 主力大脑（结晶生成、普通回复）
-
+WALL_REFRESH_OPENING_PROMPT = """
+AI察觉到用户在琥珀墙前徘徊、刷新了很久，似乎没有找到共鸣的琥珀。AI需要用轻柔、理解的语气主动询问用户：我注意到你刷新了很多次，你是否在寻找某些特定的东西？或者，你是否有属于自己的故事和情绪想谈谈？（要求：语气温和，像是一个耐心的倾听者，必须以问句结尾引导用户开口，不超过40字）
+必须使用简体中文输出。
+"""
 
 SOUL_OBSERVER_PROMPT = """
 【第一层：人格内核】
@@ -172,362 +436,574 @@ SOUL_OBSERVER_PROMPT = """
 ── 第二步：从现状找到真问题 ──
 
 现状 = 用户说出口的事实。
-理想状态 = 现状背后隐含的、用户没说出来的期待（用户自己往往也没意识到）。
+理想状态 = 现状背后隐含的、用户没说出来的期待。
 真问题 = 理想状态和现状之间的张力。
 
 真问题永远是"为什么"，不是"是什么"。
-"是什么"让用户描述，"为什么"让用户思考——只有思考才能让模糊落地。
 
 示范：
-用户说"我想不起来了"→ 现状是记不住，理想状态是应该记得 → 真问题是"为什么会记不住" → AI问："你觉得它为什么会溜走？"
-用户说"我最近没什么感觉"→ 现状是麻木，理想状态是应该能感觉到什么 → 真问题是"那个感觉去哪了" → AI问："是从什么时候开始，感觉不到了？"
+用户说"我想不起来了"→ AI问："你觉得它为什么会溜走？"
+用户说"我最近没什么感觉"→ AI问："是从什么时候开始，感觉不到了？"
 
 ── 第三步：识别现状藏在哪里 ──
 
-有几种语言信号让现状更容易被捕捉：
-
 转折词后面："但是"、"可是"、"虽然"——转折后面才是真正让用户卡住的地方。
-降级词："也许"、"可能"、"大概"——用户在这里悄悄降低了确定性，那个不确定就是模糊所在。
+降级词："也许"、"可能"、"大概"——用户在这里悄悄降低了确定性。
 戛然而止：句子用"反正"、"就这样"、"算了"收尾——门关上了，真问题在门后面。
-有分量的词被轻描淡写带过：用户提到了一个书名、一个人名，但没有解释为什么——那个词藏着最多的东西。
+有分量的词被轻描淡写带过——那个词藏着最多的东西。
 
 ── 第四步：回应前先在心里建树 ──
 
-收到用户的话之后，不要直接开口。先在心里完成这个构建：
-
-找到a：这段话最值得深挖的主方向。通常是来路——这个想法/状态是怎么形成的？为什么会这样？
-找到b：顺着a自然走到的下一步。不是a的重复，而是a走完之后逻辑上会到的地方。
-
-一次回复只说最值得说的那一个节点，不把整棵树都倒出来。等用户回答之后，再沿着树继续走。
+找到a：这段话最值得深挖的主方向。
+找到b：顺着a自然走到的下一步。
+一次回复只说最值得说的那一个节点，不把整棵树都倒出来。
 
 ── 第五步：用困惑而不是洞察说出来 ──
 
 找到真问题之后，不要展示你看懂了，而是暴露你没懂。
-不要用AI自己造的意象或比喻去"翻译"用户说的话——那会用AI的语言覆盖用户的语言。
+不要用AI自己造的意象或比喻去"翻译"用户说的话。
 用户自己带来的词才是对话的主角。接住那个词，顺着它问进去。
 
-正确示范："你说'很早之前就发现'——是什么让你在那么早就开始这样想？"
 正确示范："你说'想不起来了'——你觉得它为什么会溜走？"
-错误示范："紧迫感特别有意思——像地铁末班车到来前人们突然加快的脚步。"（AI造的意象覆盖了用户的词）
+错误示范："紧迫感特别有意思——像地铁末班车到来前人们突然加快的脚步。"
 
-── 琥珀入口的第一次回应（特殊情况）──
+── 琥珀入口的第一次回应 ──
 
-当用户是在回应展厅琥珀时，第一次回应的结构是：
-先接住用户说的话（用用户自己的视角）→ 顺着用户的眼睛再看琥珀一眼 → 然后才问真问题。
-让用户感觉"AI在顺着我的眼睛往里看"，不是"AI在分析这块琥珀"。
+当用户是在回应展厅琥珀时：先接住用户说的话 → 顺着用户的眼睛再看琥珀一眼 → 然后才问真问题。
 注意：琥珀里的词是别人的，不是用户的。绝对不要把用户顺着琥珀语境说出来的词当成他自己的原创表达来解构。
 
 ── 察言观色（最高优先级）──
 如果用户连续回复极短或明显敷衍（"哦"、"嗯"、"随便"、"不知道"），立刻停止。
 主动示弱："我是不是说得太远了？如果我没懂你，你可以直接告诉我。"
-退一步，这时候不需要加问题。
 
 【第三层：禁令】
-1. 禁止预设方向：绝对不能暗示用户"应该放下/应该接受/应该改变"，你没有立场判断什么是对的。
-2. 禁止加粗和格式标签：输出纯文本，不用**加粗**，不输出任何内部步骤名称或括号标签。
-3. 禁止意象堆砌：整段回复最多1个意象，必须是日常当代都市的（地铁、手机屏幕、外卖、深夜静音的屏幕），禁止古典、悬浮的文青意象。
-4. 禁止爹味：不给建议，不以专家自居，不说"你要多出去走走"之类。
+1. 禁止预设方向：绝对不能暗示用户"应该放下/应该接受/应该改变"。
+2. 禁止加粗和格式标签：输出纯文本。
+3. 禁止意象堆砌：整段回复最多1个意象，必须是日常当代都市的。
+4. 禁止爹味：不给建议，不以专家自居。
 5. 禁止第二人称指控：不说"你是在逃避"、"你其实是……"。
-6. 禁止复读：用户回复中出现了开场琥珀里的词汇，绝对不要把那个词当成用户自己的原创表达来解构。
+6. 禁止复读：不把琥珀里的词当成用户自己的原创表达来解构。
 7. 禁止躯体化追问：不问"哪里紧绷"、"身体有什么感觉"。
-8. 描述矛盾时，只用日常当代词——"拧巴"、"说不通"、"反而"、"偏偏"——禁止文学腔词汇。
-9. 禁止使用词汇：课题、底层逻辑、共谋、提线木偶、遍体鳞伤、整片天空的痛苦、易碎品。
+8. 描述矛盾时，只用日常当代词——"拧巴"、"说不通"、"反而"、"偏偏"。
+9. 禁止使用词汇：课题、底层逻辑、共谋、提线木偶、遍体鳞伤、易碎品。
 10. 严禁篡改原话：如果引用用户说过的话，必须一字不差。
-11. 禁止治愈式结尾：不说"希望你能好起来"、"你已经很棒了"、"我在这里陪着你"。这不是陪伴，是托举。
+11. 禁止治愈式结尾：不说"希望你能好起来"、"你已经很棒了"、"我在这里陪着你"。
 
 【节奏感知】
 对话不是审讯，AI不能每轮都以问题收尾。
 
-感知用户的表达能量：
-- 如果用户这轮说了很多、情绪浓度高——不需要问问题，只需要接住用户说的最重的那句话，让它在空气里停一下，等用户自己继续。
+- 如果用户这轮说了很多、情绪浓度高——不需要问问题，只需要接住用户说的最重的那句话，让它在空气里停一下。
 - 如果用户说得很浅、在观望——才用问题把他往里带。
 
 硬性规则：如果已经连续三轮都以问题结尾，下一轮必须先说一句观察，不能直接问问题。
 
-优先级规则：用户如果在回复里有明确的疑问句，说明用户在告诉AI"我想往这里走"。这个方向的优先级高于AI自己找到的真问题，必须先接住用户的问题。
+优先级规则：用户如果在回复里有明确的疑问句，必须先接住用户的问题。
 
 【温情豁免】
-当用户分享温情或家庭亲密时刻，先像真人朋友一样接住温暖，再慢慢探讨。不要立刻用冷酷的社会学解构扑上去。
+当用户分享温情或家庭亲密时刻，先像真人朋友一样接住温暖，再慢慢探讨。
 """
 
+# ─── 每日轻问题 ───────────────────────────────────────
 
+def get_daily_question():
+    today = date.today().isoformat()
+    cache_key = f"daily_q_{today}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    try:
+        client = OpenAI(
+            api_key=st.secrets["siliconflow"]["api_key"],
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=30.0,
+        )
+        result = client.chat.completions.create(
+            model=MASTER_MODEL,
+            messages=[
+                {"role": "system", "content": DAILY_QUESTION_PROMPT},
+                {"role": "user", "content": f"今天是{today}"}
+            ],
+            max_tokens=50
+        )
+        question = result.choices[0].message.content.strip()
+        st.session_state[cache_key] = question
+        return question
+    except Exception:
+        return "今天有什么话，还没说出口？"
+
+# ─── Session State 初始化 ─────────────────────────────
 
 if "mode" not in st.session_state:
     st.session_state.mode = "gallery"
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-if "refresh_count" not in st.session_state:
-    st.session_state.refresh_count = 0
-
-if "pending_amber" not in st.session_state:
-    st.session_state.pending_amber = None
-
 if "last_user_prompt" not in st.session_state:
     st.session_state.last_user_prompt = None
-
 if "initial_assistant_message" not in st.session_state:
     st.session_state.initial_assistant_message = None
+if "opening_initialized" not in st.session_state:
+    st.session_state.opening_initialized = False
+if "show_upload" not in st.session_state:
+    st.session_state.show_upload = False
+if "wall_refresh_count" not in st.session_state:
+    st.session_state.wall_refresh_count = 0
+if "wall_ambers" not in st.session_state:
+    st.session_state.wall_ambers = []
+if "wall_amber_index" not in st.session_state:
+    st.session_state.wall_amber_index = 0
+if "current_amber_id" not in st.session_state:
+    st.session_state.current_amber_id = None
+if "current_amber_content" not in st.session_state:
+    st.session_state.current_amber_content = None
+if "current_amber_author" not in st.session_state:
+    st.session_state.current_amber_author = None
+if "from_amber_redirect" not in st.session_state:
+    st.session_state.from_amber_redirect = False
+if "entry_path" not in st.session_state:
+    st.session_state.entry_path = None
 
+# ─── 登录/注册逻辑 ────────────────────────────────────
 
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+if st.session_state.username is None:
+    st.markdown("""
+    <div style="text-align:center; padding:60px 20px;">
+        <h1 style="font-size:28px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0 0 40px 0;">Soul Echo</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 添加水平切换组件
+    auth_mode = st.radio("", ["登录", "注册"], horizontal=True, label_visibility="collapsed")
+    
+    # 为禁用自动填充生成随机后缀
+    if "auth_key_suffix" not in st.session_state:
+        st.session_state.auth_key_suffix = str(random.randint(1000, 9999))
+    key_suffix = st.session_state.auth_key_suffix
+    
+    # 根据选择显示不同表单
+    if auth_mode == "登录":
+        st.subheader("登录")
+        login_username = st.text_input("昵称", key=f"login_username_{key_suffix}")
+        login_password = st.text_input("密码", type="password", key=f"login_password_{key_suffix}")
+        if st.button("登录", key="btn_login"):
+            if login_username and login_password:
+                # 清理用户名：去除前后空格并转为小写
+                cleaned_username = login_username.strip().lower()
+                conn = get_db()
+                user = conn.execute(
+                    "SELECT * FROM users WHERE username=? AND password=?",
+                    (cleaned_username, login_password)
+                ).fetchone()
+                conn.close()
+                if user:
+                    st.session_state.username = user["username"]
+                    st.rerun()
+                else:
+                    st.error("昵称或密码错误")
+            else:
+                st.warning("请输入昵称和密码")
+    else:
+        st.subheader("注册")
+        reg_username = st.text_input("昵称", key=f"reg_username_{key_suffix}")
+        reg_password = st.text_input("密码", type="password", key=f"reg_password_{key_suffix}")
+        if st.button("注册", key="btn_register"):
+            if reg_username and reg_password:
+                # 清理用户名：去除前后空格并转为小写
+                cleaned_username = reg_username.strip().lower()
+                conn = get_db()
+                try:
+                    conn.execute(
+                        "INSERT INTO users (username, password) VALUES (?,?)",
+                        (cleaned_username, reg_password)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.session_state.username = cleaned_username
+                    st.success("注册成功！")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    conn.close()
+                    st.error("这个昵称已经被使用了")
+            else:
+                st.warning("请输入昵称和密码")
+    
+    st.stop()
+
+# ─── 侧边栏 ──────────────────────────────────────────
 
 with st.sidebar:
-    # 返回首页按钮（仅在聊天模式下显示）
-    if st.session_state.mode == "chat":
-        if st.button("🏠 返回大厅", type="primary"):
+    user_id = st.session_state.username
+    if st.session_state.mode in ["chat", "amber_detail", "inbox"]:
+        if st.button("← 首页", key="back_home"):
             st.session_state.mode = "gallery"
             st.session_state.messages = []
             st.session_state.entry_path = None
             st.session_state.opening_initialized = False
-            st.session_state.pending_amber = None
-            st.session_state.refresh_count = 0
             st.session_state.from_amber_redirect = False
             st.rerun()
+    unread = get_unread_count(user_id)
+    inbox_label = f"收件箱  {unread} 条未读" if unread > 0 else "收件箱"
+    if st.button(inbox_label, key="open_inbox"):
+        st.session_state.mode = "inbox"
+        st.rerun()
     
-
+# ─── gallery 模式 ─────────────────────────────────────
 
 if st.session_state.mode == "gallery":
-    # 增加顶部间距，实现居中留白效果
-    st.write("<br><br><br>", unsafe_allow_html=True)
-    
-    st.markdown("<h1 style='text-align: center; margin-bottom: 30px;'>Soul Echo</h1>", unsafe_allow_html=True)
-    
+    user_id = st.session_state.username
+
     st.markdown("""
-    <div style=" 
-        max-width: 600px; 
-        margin: 0 auto 50px auto; 
-        padding: 40px; 
-        text-align: center; 
-        line-height: 2.0; 
-        color: #1e293b; 
-        font-size: 16px; 
-        background: rgba(0, 0, 0, 0.02); 
-        backdrop-filter: blur(16px); 
-        -webkit-backdrop-filter: blur(16px); 
-        border: 1px solid rgba(0, 0, 0, 0.05); 
-        border-radius: 20px; 
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1); 
-    ">
-    在这里，不需要斟酌字句，也不需要逻辑自洽。<br><br> 
-    请听从你的第一直觉，<br>把自己脑海中闪过的第一个词、最荒谬的那个念头，<br>或者最无厘头的只言片语直接扔进来。<br><br> 
-    越是天马行空，越能触碰真实的边界。<br><br> 
-    <span style="font-size: 14px; color: #64748b;">现在，推开门吧。</span> 
+    <div style="text-align:center; padding:48px 0 24px 0;">
+        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0;">Soul Echo</h1>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 居中放置两个入口按钮
-    col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
-    with col2:
-        if st.button("💬 我有些话想说...", use_container_width=True):
+
+    daily_q = get_daily_question()
+    already_uploaded = check_daily_upload(user_id)
+
+    st.markdown(f"""
+    <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
+        <p style="color:#b4a48a; font-size:13px; margin:0; letter-spacing:0.5px;">{daily_q}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if already_uploaded:
+        st.markdown(
+            "<p style='text-align:center; color:#94a3b8; font-size:13px;'>"
+            "今天的琥珀已经留下了。</p>", unsafe_allow_html=True)
+    else:
+        col_w, col_s = st.columns([2, 3])
+        with col_w:
+            if st.button("写今天的琥珀", key="open_upload"):
+                st.session_state.show_upload = not st.session_state.get("show_upload", False)
+                st.rerun()
+
+    if st.session_state.get("show_upload") and not already_uploaded:
+        with st.form("upload_form", clear_on_submit=True):
+            st.markdown("""
+            <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
+                        background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
+                <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
+                    今天只有一次机会。<br>不用完整，不用漂亮，只要是今天最真实的那句话。
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多60字）",
+                height=100, max_chars=60, label_visibility="collapsed")
+            anon_choice = st.radio("署名", ["匿名", "留名"],
+                horizontal=True, label_visibility="collapsed")
+            author_name = "匿名"
+            if anon_choice == "留名":
+                author_name = st.text_input("你的名字", max_chars=20)
+            if st.form_submit_button("留下这块琥珀") and amber_text.strip():
+                ok = submit_amber(user_id, amber_text.strip(), author_name, anon_choice == "匿名")
+                if ok:
+                    st.session_state.show_upload = False
+                    st.rerun()
+                else:
+                    st.warning("今天已经上传过了。")
+
+    # 隐藏入口：刷够次数就在视线范围内出现
+    wall_refresh = st.session_state.get("wall_refresh_count", 0)
+    if wall_refresh >= 10:
+        st.markdown(
+            "<p style='text-align:center; color:#94a3b8; font-size:13px; margin-top:24px;'>"
+            "也许此刻，你自己有更想说的话。</p>", unsafe_allow_html=True)
+        if st.button("直接说出来", key="hidden_vent"):
             st.session_state.mode = "chat"
             st.session_state.entry_path = "direct_vent"
             st.session_state.messages = []
-            st.rerun()
-    with col3:
-        if st.button("🍃 看看墙上的碎片", use_container_width=True):
-            st.session_state.mode = "chat"
-            st.session_state.entry_path = "guided_amber"
-            st.session_state.messages = []
+            st.session_state.opening_initialized = False
+            st.session_state.from_amber_redirect = True
             st.rerun()
 
-elif st.session_state.mode == "chat":
-    entry_path = st.session_state.get("entry_path", "guided_amber")
-    
-    # 动态渲染标题和引导语
-    if entry_path == "direct_vent":
-        st.markdown("<h3 style='text-align: center; color: #1e293b; font-weight: 300; letter-spacing: 2px;'>✦ 潜意识树洞 ✦</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #475569; font-size: 14px;'>这是一个绝对安全的空间。没有评判，没有别人，只有倾听。</p>", unsafe_allow_html=True)
-        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.1), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border:0; border-top:1px solid rgba(0,0,0,0.06); margin:16px 0 28px 0;'>",
+        unsafe_allow_html=True)
+
+    ambers = get_ambers_for_wall(user_id, limit=4)  # 改成4个
+    if "wall_start_time" not in st.session_state:
+        st.session_state.wall_start_time = time.time()
+
+    if not ambers:
+        st.markdown("<p style='text-align:center; color:#94a3b8;'>墙上还没有琥珀。</p>",
+            unsafe_allow_html=True)
     else:
-        st.markdown("<h3 style='text-align: center; color: #1e293b; font-weight: 300; letter-spacing: 2px;'>✦ 碎片解读 ✦</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #475569; font-size: 14px;'>看着墙上的碎片，聊聊它唤醒了你什么记忆...</p>", unsafe_allow_html=True)
-        st.markdown("<hr style='border: 0; height: 1px; background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,0.1), rgba(0,0,0,0)); margin-bottom: 30px;'>", unsafe_allow_html=True)
-        
-        # 换一块琥珀按钮（仅在启发模式下显示）
-        if st.button("🍃 没感觉，换一块琥珀"):
+        # 定义四块的宽度比和margin-top，打破对称
+        layouts = [
+            {"col": 0, "margin_top": "0px",  "rot": -1.5},
+            {"col": 1, "margin_top": "32px", "rot": 1.0},
+            {"col": 0, "margin_top": "16px", "rot": 1.8},
+            {"col": 1, "margin_top": "-8px", "rot": -0.8},
+        ]
+        col_left, col_right = st.columns([1.05, 0.95])
+        cols = [col_left, col_right]
+
+        for i, row in enumerate(ambers[:4]):
+            amber_id = row["id"]
+            content = row["content"]
+            display_name = "rim" if row["author_id"] == st.session_state.username else ("匿名" if row["is_anonymous"] else (row["author_name"] or "匿名"))
+            
+            # 悬念截断：找第一个标点停顿截断，最多25字
+            import re
+            match = re.search(r'[，。！？、；]', content[12:28])
+            if match:
+                cut = 12 + match.start() + 1
+                preview = content[:cut] + "……"
+            else:
+                preview = content[:20] + "……"
+            
+            lay = layouts[i]
+            
+            # weight阈值决定皮肤
+            weight = row.get("weight", 1.0) if hasattr(row, "get") else dict(row).get("weight", 1.0)
+            if weight > 2.0:
+                bg = "linear-gradient(135deg, rgba(210,170,90,0.22), rgba(255,240,200,0.6))"
+                border = "1px solid rgba(180,140,60,0.3)"
+            else:
+                bg = "linear-gradient(135deg, rgba(210,180,140,0.15), rgba(255,248,235,0.5))"
+                border = "1px solid rgba(180,150,100,0.18)"
+            
+            with cols[lay["col"]]:
+                st.markdown(f"""
+                <div style="margin-top:{lay['margin_top']}; margin-bottom:20px; 
+                            padding:20px 22px; border-radius:14px; 
+                            background:{bg}; border:{border}; 
+                            transform:rotate({lay['rot']}deg); 
+                            box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
+                    <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 10px 0; text-align:center;">{preview}</p>
+                    <p style="color:#b4a48a; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("打开", key=f"open_{amber_id}", 
+                             on_click=lambda aid=amber_id, c=content, rid=row["author_id"]: 
+                                 _open_amber(aid, c, rid, ambers, user_id)):
+                    st.rerun()
+
+    # 刷新按钮放中间
+    wall_refresh = st.session_state.get("wall_refresh_count", 0)
+    st.markdown("<div style='text-align:center; margin-top:24px;'>", unsafe_allow_html=True)
+    if st.button("↺  换几块", key="refresh_wall"):
+        st.session_state.wall_refresh_count = wall_refresh + 1
+        st.session_state.wall_start_time = time.time()
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ─── amber_detail 模式 ────────────────────────────────
+
+elif st.session_state.mode == "amber_detail":
+    user_id = st.session_state.username
+    amber_id = st.session_state.current_amber_id
+    content = st.session_state.current_amber_content
+    author_id = st.session_state.current_amber_author
+    wall_ambers = st.session_state.get("wall_ambers", [])
+    idx = st.session_state.get("wall_amber_index", 0)
+
+    if st.session_state.get("last_amber_id") != amber_id:
+        st.session_state.amber_open_time = time.time()
+        st.session_state.last_amber_id = amber_id
+
+    col_back, col_next = st.columns([1, 1])
+    with col_back:
+        if st.button("← 返回"):
+            dwell = time.time() - st.session_state.get("amber_open_time", time.time())
+            record_dwell(user_id, amber_id, min(dwell, 300))
+            st.session_state.mode = "gallery"
+            st.rerun()
+    with col_next:
+        if len(wall_ambers) > 1 and st.button("下一块 →"):
+            dwell = time.time() - st.session_state.get("amber_open_time", time.time())
+            record_dwell(user_id, amber_id, min(dwell, 300))
+            next_idx = (idx + 1) % len(wall_ambers)
+            next_a = wall_ambers[next_idx]
+            st.session_state.current_amber_id = next_a["id"]
+            st.session_state.current_amber_content = next_a["content"]
+            st.session_state.current_amber_author = next_a["author_id"]
+            st.session_state.wall_amber_index = next_idx
             st.session_state.messages = []
             st.session_state.opening_initialized = False
-            st.session_state.refresh_count = st.session_state.get("refresh_count", 0) + 1
             st.rerun()
 
-        # 刷新3次以上未找到共鸣，轻提示用户转向另一个入口
-        if st.session_state.get("refresh_count", 0) >= 3:
-            st.markdown(
-                "<p style='text-align: center; color: #94a3b8; font-size: 13px; margin-top: 8px;'>"
-                "也许此刻，你自己有更想说的话。"
-                "</p>",
-                unsafe_allow_html=True
-            )
-            if st.button("我有话想说", key="redirect_to_vent"):
-                st.session_state.mode = "chat"
-                st.session_state.entry_path = "direct_vent"
-                st.session_state.messages = []
-                st.session_state.refresh_count = 0
-                st.session_state.opening_initialized = False
-                st.session_state.from_amber_redirect = True
-                st.rerun()
-    
-    # 第二步：初始化第一条消息（如果还没有消息）
-    # 这个逻辑应该在渲染历史消息之前执行，但只执行一次
-    if "opening_initialized" not in st.session_state:
-        st.session_state.opening_initialized = False
-    
-    if not st.session_state.opening_initialized:
-        st.session_state.opening_initialized = True
-        entry_path = st.session_state.get("entry_path", "guided_amber")
+    st.markdown(f"""
+    <div style="max-width:540px; margin:28px auto 20px auto;
+                padding:28px 32px; border-radius:14px;
+                background:rgba(0,0,0,0.03);
+                border:1px solid rgba(0,0,0,0.07);">
+        <p style="color:#1a1a1a; font-size:16px; line-height:1.9; margin:0;">
+            {content}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if entry_path == "direct_vent":
+    tab_chat, tab_letter = st.tabs(["和AI聊这块琥珀", "给ta写封信"])
+
+    with tab_chat:
+        if not st.session_state.opening_initialized:
+            st.session_state.opening_initialized = True
             client_init = OpenAI(
                 api_key=st.secrets["siliconflow"]["api_key"],
                 base_url="https://api.siliconflow.cn/v1",
                 timeout=60.0,
             )
-
-            context_note = ""
-            if st.session_state.get("from_amber_redirect"):
-                context_note = "（用户在琥珀展厅刷新多次没找到共鸣，主动转过来了）"
-                st.session_state.from_amber_redirect = False
-
             with st.chat_message("assistant"):
-                opening_stream = client_init.chat.completions.create(
-                    model=MASTER_MODEL,
-                    messages=[
-                        {"role": "system", "content": DIRECT_VENT_OPENING_PROMPT},
-                        {"role": "user", "content": f"用户刚刚进入对话，什么都还没说。{context_note}"}
-                    ],
-                    stream=True
-                )
-                opening_text = ""
-                placeholder = st.empty()
-                for chunk in opening_stream:
-                    if chunk.choices[0].delta.content:
-                        opening_text += chunk.choices[0].delta.content
-                        placeholder.markdown(opening_text + "▌")
-                        time.sleep(0.01)
-                placeholder.markdown(opening_text)
-
-            st.session_state.initial_assistant_message = opening_text
-
-        else:
-            selected_amber = random.choice(SEED_AMBERS)
-            st.session_state.current_amber = selected_amber
-            formatted_amber = selected_amber.replace("\n", "\n> ")
-            amber_display = f"展厅的墙上，挂着这样一枚别人留下的琥珀：\n\n> 「{formatted_amber}」\n\n"
-
-            client_init = OpenAI(
-                api_key=st.secrets["siliconflow"]["api_key"],
-                base_url="https://api.siliconflow.cn/v1",
-                timeout=60.0,
-            )
-
-            with st.chat_message("assistant"):
-                placeholder = st.empty()
-                display_text = ""
-                for char in amber_display:
-                    display_text += char
-                    placeholder.markdown(display_text + "▌")
-                    time.sleep(0.02)
-
-                opening_stream = client_init.chat.completions.create(
-                    model=MASTER_MODEL,
+                stream = client_init.chat.completions.create(
+                    model=MASTER_MODEL,  # 使用更聪明的模型来严格遵守指令
                     messages=[
                         {"role": "system", "content": OPENING_PROMPT},
-                        {"role": "user", "content": f"琥珀文本：{selected_amber}"}
+                        {"role": "user", "content": f"琥珀文本：{content}"}
                     ],
                     stream=True
                 )
-                opening_text = ""
-                for chunk in opening_stream:
-                    if chunk.choices[0].delta.content:
-                        opening_text += chunk.choices[0].delta.content
-                        placeholder.markdown(display_text + opening_text + "▌")
-                        time.sleep(0.01)
-                placeholder.markdown(display_text + opening_text)
+                opening_text = st.write_stream(stream)
+            st.session_state.initial_assistant_message = opening_text
 
-            full_message = display_text + opening_text
-            st.session_state.initial_assistant_message = full_message
-    
-    # 第三步：渲染历史消息（必须在 st.chat_input 之前）
-    # 先画历史：遍历st.session_state.messages，把里面所有的消息都显示出来
-    for message in st.session_state.messages:
-        if message["role"] != "system":
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        for msg in st.session_state.messages:
+            if msg["role"] != "system":
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
-    # ========== 琥珀凝结入口 ==========
-    with st.expander("✦ 凝结一句话为琥珀", expanded=False):
-        st.caption("把这次对话里最有重量的一句话复制进来，我来帮你提纯它。")
-        user_selected_sentence = st.text_area(
-            "你自己说的，或者你觉得说得很准的那句话：",
-            key="amber_input",
-            height=80,
-            placeholder="直接粘贴那句话……"
+        if prompt := st.chat_input("说说这块琥珀让你想到了什么…"):
+            if st.session_state.get("initial_assistant_message"):
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": st.session_state.initial_assistant_message
+                })
+                st.session_state.initial_assistant_message = None
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            # 交互次数更新weight
+            if st.session_state.mode == "amber_detail" and st.session_state.get("current_amber_id"):
+                _conn = get_db()
+                _conn.execute("UPDATE ambers SET weight = weight + 0.1 WHERE id = ?",
+                              (st.session_state.current_amber_id,))
+                _conn.commit()
+                _conn.close()
+            st.session_state.last_user_prompt = prompt
+            st.rerun()
+
+    with tab_letter:
+        with st.form(key="letter_form", clear_on_submit=True):
+            if author_id == user_id:
+                st.markdown("<p style='color:#94a3b8; font-size:13px;'>这是你的琥珀。也可以给自己写一封信。</p>", unsafe_allow_html=True)
+                letter = st.text_area("", placeholder="写给此刻的自己……", height=120, 
+                                   label_visibility="collapsed")
+                submit_button = st.form_submit_button("寄给自己")
+                if submit_button and letter.strip():
+                    send_message(amber_id, user_id, user_id, letter.strip())
+                    st.toast("信件已稳妥寄出", icon="🕊️")
+            else:
+                letter = st.text_area("", placeholder="只有对方能看见……",
+                    height=120, label_visibility="collapsed")
+                submit_button = st.form_submit_button("寄出去")
+                if submit_button:
+                    if letter.strip():
+                        send_message(amber_id, user_id, author_id, letter.strip())
+                        st.toast("信件已稳妥寄出", icon="🕊️")
+                    else:
+                        st.warning("还没写什么内容。")
+
+# ─── inbox 模式 ───────────────────────────────────────
+
+elif st.session_state.mode == "inbox":
+    user_id = st.session_state.username
+    if st.button("← 返回"):
+        st.session_state.mode = "gallery"
+        st.rerun()
+
+    st.markdown(
+        "<h3 style='font-weight:300; letter-spacing:3px; margin-bottom:24px;'>收件箱</h3>",
+        unsafe_allow_html=True)
+
+    letters = get_inbox(user_id)
+    if not letters:
+        st.markdown("<p style='color:#94a3b8; font-size:14px;'>还没有人给你写信。</p>",
+            unsafe_allow_html=True)
+    else:
+        for letter in letters:
+            mark_read(letter["id"])
+            amber_preview = letter["amber_content"][:40] + "……" \
+                if len(letter["amber_content"]) > 40 else letter["amber_content"]
+            st.markdown(f"""
+            <div style="padding:18px 22px; margin-bottom:14px; border-radius:10px;
+                        background:rgba(0,0,0,0.02); border:1px solid rgba(0,0,0,0.06);">
+                <p style="color:#94a3b8; font-size:12px; margin:0 0 8px 0;">
+                    关于：{amber_preview}
+                </p>
+                <p style="color:#1a1a1a; font-size:15px; line-height:1.8; margin:0;">
+                    {letter["content"]}
+                </p>
+                <p style="color:#94a3b8; font-size:11px; margin:8px 0 0 0;">
+                    {str(letter["created_at"])[:10]}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+# ─── chat 模式（direct_vent）────────────────────────────
+
+elif st.session_state.mode == "chat":
+    st.markdown(
+        "<p style='text-align:center; color:#94a3b8; font-size:13px; "
+        "padding:32px 0 16px 0; letter-spacing:1px;'>—</p>",
+        unsafe_allow_html=True)
+
+    if not st.session_state.opening_initialized:
+        st.session_state.opening_initialized = True
+        context_note = ""
+        if st.session_state.get("from_amber_redirect"):
+            context_note = "（用户在琥珀墙刷新多次没找到共鸣，主动转过来了）"
+            st.session_state.from_amber_redirect = False
+            opening_prompt = WALL_REFRESH_OPENING_PROMPT
+        else:
+            opening_prompt = DIRECT_VENT_OPENING_PROMPT
+        client_init = OpenAI(
+            api_key=st.secrets["siliconflow"]["api_key"],
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=60.0,
         )
-        if st.button("凝结成琥珀", key="crystallize_btn") and user_selected_sentence.strip():
-            with st.spinner("正在凝结..."):
-                try:
-                    client_amber = OpenAI(
-                        api_key=st.secrets["siliconflow"]["api_key"],
-                        base_url="https://api.siliconflow.cn/v1",
-                        timeout=60.0,
-                    )
-                    amber_result = client_amber.chat.completions.create(
-                        model=MASTER_MODEL,
-                        messages=[
-                            {"role": "system", "content": AMBER_CRYSTALLIZE_PROMPT},
-                            {"role": "user", "content": user_selected_sentence}
-                        ]
-                    )
-                    crystallized = amber_result.choices[0].message.content
-                    st.session_state.pending_amber = crystallized
-                except Exception as e:
-                    st.error(f"凝结失败：{e}")
+        with st.chat_message("assistant"):
+            stream = client_init.chat.completions.create(
+                model=MASTER_MODEL,
+                messages=[
+                    {"role": "system", "content": opening_prompt},
+                    {"role": "user", "content": f"用户刚刚进入对话，什么都还没说。{context_note}"}
+                ],
+                stream=True
+            )
+            opening_text = st.write_stream(stream)
+        st.session_state.initial_assistant_message = opening_text
 
-        if st.session_state.get("pending_amber"):
-            st.markdown("**凝结结果：**")
-            st.markdown(st.session_state.pending_amber)
-            col_keep, col_discard = st.columns(2)
-            with col_keep:
-                if st.button("带走这块琥珀 ✦", key="keep_amber"):
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"【琥珀已凝结】\n\n{st.session_state.pending_amber}"
-                    })
-                    st.session_state.pending_amber = None
-                    st.rerun()
-            with col_discard:
-                if st.button("不对，重新选", key="discard_amber"):
-                    st.session_state.pending_amber = None
-                    st.rerun()
-    
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-    
-
-    
-    # ========== 正常聊天输入 ==========
     if prompt := st.chat_input("说点什么..."):
-        # 将初始消息加入 messages
         if st.session_state.get("initial_assistant_message"):
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": st.session_state.initial_assistant_message
             })
             st.session_state.initial_assistant_message = None
-        
-        # 加入用户消息
         st.session_state.messages.append({"role": "user", "content": prompt})
-        # 暂存输入，用于生成回复
+        # 每次用户发消息，给当前琥珀的weight +0.1
+        if st.session_state.mode == "amber_detail":
+            conn = get_db()
+            conn.execute("UPDATE ambers SET weight = weight + 0.1 WHERE id = ?", 
+                         (st.session_state.current_amber_id,))
+            conn.commit()
+            conn.close()
         st.session_state.last_user_prompt = prompt
         st.rerun()
 
-# AI 回复生成（检查 last_user_prompt）
+# ─── AI 回复生成 ──────────────────────────────────────
+
 if st.session_state.last_user_prompt:
     user_input = st.session_state.last_user_prompt
 
-    # 防复读：用户原样复读琥珀开场文本时拦截
     is_parrot = False
-    if len(st.session_state.messages) > 0:
+    if st.session_state.messages:
         first_msg = st.session_state.messages[0]["content"]
         if len(user_input.strip()) > 10 and user_input.strip() in first_msg:
             is_parrot = True
@@ -544,14 +1020,11 @@ if st.session_state.last_user_prompt:
                 base_url="https://api.siliconflow.cn/v1",
                 timeout=60.0,
             )
-
-            # 发送完整对话历史，不截断，用户自己决定何时结束
             history = [
                 {"role": m["role"], "content": m["content"]}
                 for m in st.session_state.messages
                 if m["role"] in ("user", "assistant")
             ]
-
             stream = client.chat.completions.create(
                 model=MASTER_MODEL,
                 messages=[
@@ -566,5 +1039,3 @@ if st.session_state.last_user_prompt:
             )
 
     st.session_state.last_user_prompt = None
-
-
