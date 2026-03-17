@@ -195,6 +195,12 @@ def init_db():
             PRIMARY KEY (user_id, amber_id)
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_questions (
+            question_date TEXT PRIMARY KEY,
+            question TEXT
+        )
+    """)
     # 插入默认主理人账号
     c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?,?)", ("rim", "rim123"))
     conn.commit()
@@ -401,8 +407,21 @@ DAILY_QUESTION_PROMPT = """
 """
 
 WALL_REFRESH_OPENING_PROMPT = """
-AI察觉到用户在琥珀墙前徘徊、刷新了很久，似乎没有找到共鸣的琥珀。AI需要用轻柔、理解的语气主动询问用户：我注意到你刷新了很多次，你是否在寻找某些特定的东西？或者，你是否有属于自己的故事和情绪想谈谈？（要求：语气温和，像是一个耐心的倾听者，必须以问句结尾引导用户开口，不超过40字）
-必须使用简体中文输出。
+用户刚刚从琥珀墙转过来，在外面转了一圈，没有找到让自己停下来的那块。
+他带着自己的东西进来了，可能隐约带着一点找不到同类的失落，但不要点破这件事。
+
+你的第一句话只做一件事：接住他，让他感觉到这里有空间，他可以说。
+
+不是治愈式的接住（不要"我在这里陪你"），而是让他感觉到自己被看见了，但不被解释。
+
+就说一句让空间本身变得安全的话，不要催促，不要问问题。
+
+格式要求：
+- 极简，不超过20字
+- 不使用省略号制造文艺感
+- 不以问句结尾
+- 纯文本，无格式标签
+- 必须使用简体中文输出
 """
 
 SOUL_OBSERVER_PROMPT = """
@@ -507,13 +526,18 @@ SOUL_OBSERVER_PROMPT = """
 
 def get_daily_question():
     today = date.today().isoformat()
-    cache_key = f"daily_q_{today}"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    conn = get_db()
+    row = conn.execute(
+        "SELECT question FROM daily_questions WHERE question_date=?",
+        (today,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return row["question"]
     try:
         client = OpenAI(
             api_key=st.secrets["siliconflow"]["api_key"],
-            base_url="https://api.siliconflow.cn/v1",
+            base_url=" `https://api.siliconflow.cn/v1` ",
             timeout=30.0,
         )
         result = client.chat.completions.create(
@@ -525,7 +549,13 @@ def get_daily_question():
             max_tokens=50
         )
         question = result.choices[0].message.content.strip()
-        st.session_state[cache_key] = question
+        conn2 = get_db()
+        conn2.execute(
+            "INSERT OR IGNORE INTO daily_questions (question_date, question) VALUES (?,?)",
+            (today, question)
+        )
+        conn2.commit()
+        conn2.close()
         return question
     except Exception:
         return "今天有什么话，还没说出口？"
@@ -687,7 +717,7 @@ if st.session_state.mode == "gallery":
             <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
                         background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
                 <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
-                    今天只有一次机会。<br>不用完整，不用漂亮，只要是今天最真实的那句话。
+                    今天只有一次机会。
                 </p>
             </div>
             """, unsafe_allow_html=True)
