@@ -11,7 +11,13 @@ os.environ.pop("HTTPS_PROXY", None)
 os.environ.pop("http_proxy", None)
 os.environ.pop("https_proxy", None)
 
-st.set_page_config(page_title="Soul Echo", page_icon="🪨", layout="centered")
+st.set_page_config(
+    page_title="Soul Echo",
+    page_icon="🪨",
+    layout="centered",
+    initial_sidebar_state="auto",
+    menu_items=None  # 隐藏菜单
+)
 
 st.markdown("""
 <style>
@@ -133,8 +139,50 @@ st.markdown("""
     [data-testid="stStatusWidget"] {
         visibility: hidden;
     }
-</style>
-""", unsafe_allow_html=True)
+
+    /* 隐藏所有可能的加载指示器 */
+    div[data-testid="stStatusWidget"],
+    div[data-testid="stToolbar"],
+    div[data-testid="stDecoration"] {
+        display: none !important;
+    }
+
+    /* 禁止任何元素产生过渡动画 */
+    * {
+        transition: none !important;
+        animation: none !important;
+        transform: none !important;
+    }
+
+    /* 禁用所有可能的动画类 */
+    .animated, .fade-in, .fade-out, .slide-in, .slide-out {
+        animation: none !important;
+        transition: none !important;
+    }
+
+    /* 手机端强制显示侧边栏 */
+    @media (max-width: 640px) {
+        /* 让侧边栏始终可见，不隐藏 */
+        [data-testid="stSidebar"] {
+            position: relative !important;
+            width: 200px !important;
+            margin-left: 0 !important;
+            transform: none !important;
+            visibility: visible !important;
+            display: block !important;
+        }
+        /* 调整主内容区域，避免被侧边栏覆盖 */
+        .main .block-container {
+            margin-left: 200px !important;
+            padding-left: 1rem !important;
+            max-width: calc(100% - 200px) !important;
+        }
+        /* 隐藏Streamlit默认的汉堡菜单按钮 */
+        button[kind="headerNoPadding"] {
+            display: none !important;
+        }
+    }
+</style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
 
@@ -295,6 +343,8 @@ def submit_amber(user_id, content, author_name, is_anonymous):
             (user_id, today, amber_id)
         )
         conn.commit()
+        # 上传成功后重新加载琥珀列表
+        st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
         return True
     except sqlite3.IntegrityError:
         return False
@@ -340,12 +390,14 @@ def get_unread_count(user_id):
 # ─── Prompts ──────────────────────────────────────────
 
 MASTER_MODEL = "deepseek-ai/DeepSeek-V3"
+FAST_OPENING_MODEL = "Qwen/Qwen2.5-7B-Instruct"  # 快速模型用于生成开场白
 
 OPENING_PROMPT = """
 你现在看到一块琥珀文本。这是展厅里别人留下的一段真实独白。
 你的任务是生成一段引导语，紧接在琥珀展示之后，让用户自然想开口。
 
-引导语分三层依次递进。第一层每次必须从以下四种姿态中选一种，不能每次都用同一种：
+引导语分三层依次递进。第一层每次必须从以下四种姿态中选一种，不能每次都用同一种。
+注意：下面列出的参考句式仅用于启发你的思路，你生成的引导语中绝对不能出现这些参考句式本身，也不能出现"姿态一"之类的标签。你只需要输出纯粹的引导语。
 
 【姿态一：抓细节】
 揪住琥珀里一个最具体的词或画面，轻声问它为什么在这里。
@@ -373,7 +425,7 @@ OPENING_PROMPT = """
 - 语气当代、轻柔、口语，不文青
 - 主语永远是"这块琥珀"、"它"、"ta"，第三层才出现"你说"，绝对禁止用"你"直接追问用户私事
 - 必须使用简体中文输出
-- 只输出引导语本身，不要任何解释
+- 只输出引导语本身，不要任何解释或参考文字
 """
 
 DIRECT_VENT_OPENING_PROMPT = """
@@ -572,8 +624,7 @@ if "initial_assistant_message" not in st.session_state:
     st.session_state.initial_assistant_message = None
 if "opening_initialized" not in st.session_state:
     st.session_state.opening_initialized = False
-if "show_upload" not in st.session_state:
-    st.session_state.show_upload = False
+
 if "wall_refresh_count" not in st.session_state:
     st.session_state.wall_refresh_count = 0
 if "wall_ambers" not in st.session_state:
@@ -673,10 +724,19 @@ with st.sidebar:
             st.session_state.opening_initialized = False
             st.session_state.from_amber_redirect = False
             st.rerun()
-    unread = get_unread_count(user_id)
+    # 使用缓存的未读消息数量，避免重复查询
+    if "unread_count" not in st.session_state or st.session_state.get("last_unread_check") != user_id:
+        st.session_state.unread_count = get_unread_count(user_id)
+        st.session_state.last_unread_check = user_id
+    unread = st.session_state.unread_count
+    
     inbox_label = f"收件箱  {unread} 条未读" if unread > 0 else "收件箱"
     if st.button(inbox_label, key="open_inbox"):
         st.session_state.mode = "inbox"
+        st.rerun()
+    
+    if st.button("我的琥珀", key="my_ambers"):
+        st.session_state.mode = "my_ambers"
         st.rerun()
     
 # ─── gallery 模式 ─────────────────────────────────────
@@ -684,12 +744,26 @@ with st.sidebar:
 if st.session_state.mode == "gallery":
     user_id = st.session_state.username
 
-    st.markdown("""
-    <div style="text-align:center; padding:48px 0 24px 0;">
-        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
-                   color:#1a1a1a; margin:0;">Soul Echo</h1>
-    </div>
-    """, unsafe_allow_html=True)
+    # 缓存未读消息数量，避免重复查询
+    if "unread_count" not in st.session_state or st.session_state.get("last_unread_check") != user_id:
+        st.session_state.unread_count = get_unread_count(user_id)
+        st.session_state.last_unread_check = user_id
+    unread = st.session_state.unread_count
+    
+    # 标题和收件箱按钮布局
+    col_title, col_inbox = st.columns([3, 1])
+    with col_title:
+        st.markdown("""
+        <div style="padding:48px 0 24px 0;">
+            <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                       color:#1a1a1a; margin:0;">Soul Echo</h1>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_inbox:
+        inbox_label = f"收件箱 📬 ({unread})" if unread > 0 else "收件箱 📬"
+        if st.button(inbox_label, key="main_inbox_button"):
+            st.session_state.mode = "inbox"
+            st.rerun()
 
     daily_q = get_daily_question()
     already_uploaded = check_daily_upload(user_id)
@@ -708,33 +782,8 @@ if st.session_state.mode == "gallery":
         col_w, col_s = st.columns([2, 3])
         with col_w:
             if st.button("写今天的琥珀", key="open_upload"):
-                st.session_state.show_upload = not st.session_state.get("show_upload", False)
+                st.session_state.mode = "write_amber"
                 st.rerun()
-
-    if st.session_state.get("show_upload") and not already_uploaded:
-        with st.form("upload_form", clear_on_submit=True):
-            st.markdown("""
-            <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
-                        background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
-                <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
-                    今天只有一次机会。
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多60字）",
-                height=100, max_chars=60, label_visibility="collapsed")
-            anon_choice = st.radio("署名", ["匿名", "留名"],
-                horizontal=True, label_visibility="collapsed")
-            author_name = "匿名"
-            if anon_choice == "留名":
-                author_name = st.text_input("你的名字", max_chars=20)
-            if st.form_submit_button("留下这块琥珀") and amber_text.strip():
-                ok = submit_amber(user_id, amber_text.strip(), author_name, anon_choice == "匿名")
-                if ok:
-                    st.session_state.show_upload = False
-                    st.rerun()
-                else:
-                    st.warning("今天已经上传过了。")
 
     # 隐藏入口：刷够次数就在视线范围内出现
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
@@ -754,7 +803,18 @@ if st.session_state.mode == "gallery":
         "<hr style='border:0; border-top:1px solid rgba(0,0,0,0.06); margin:16px 0 28px 0;'>",
         unsafe_allow_html=True)
 
-    ambers = get_ambers_for_wall(user_id, limit=4)  # 改成4个
+    # 初始化或获取琥珀列表
+    if "all_ambers" not in st.session_state:
+        # 第一次加载时从数据库获取较多琥珀
+        st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
+    
+    # 从缓存的琥珀中随机挑选4个
+    import random
+    if st.session_state.all_ambers:
+        ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
+    else:
+        ambers = []
+    
     if "wall_start_time" not in st.session_state:
         st.session_state.wall_start_time = time.time()
 
@@ -775,7 +835,11 @@ if st.session_state.mode == "gallery":
         for i, row in enumerate(ambers[:4]):
             amber_id = row["id"]
             content = row["content"]
-            display_name = "rim" if row["author_id"] == st.session_state.username else ("匿名" if row["is_anonymous"] else (row["author_name"] or "匿名"))
+            # 特殊处理：rim的琥珀统一显示为匿名
+            if row["author_id"] == "rim":
+                display_name = "匿名"
+            else:
+                display_name = st.session_state.username if row["author_id"] == st.session_state.username else ("匿名" if row["is_anonymous"] else (row["author_name"] or "匿名"))
             
             # 悬念截断：找第一个标点停顿截断，最多25字
             import re
@@ -808,10 +872,9 @@ if st.session_state.mode == "gallery":
                     <p style="color:#b4a48a; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
                 </div>
                 """, unsafe_allow_html=True)
-                if st.button("打开", key=f"open_{amber_id}", 
-                             on_click=lambda aid=amber_id, c=content, rid=row["author_id"]: 
-                                 _open_amber(aid, c, rid, ambers, user_id)):
-                    st.rerun()
+                st.button("打开", key=f"open_{amber_id}",
+                          on_click=lambda aid=amber_id, c=content, rid=row["author_id"]:
+                              _open_amber(aid, c, rid, ambers, user_id))
 
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
@@ -819,6 +882,10 @@ if st.session_state.mode == "gallery":
     if st.button("↺  换几块", key="refresh_wall"):
         st.session_state.wall_refresh_count = wall_refresh + 1
         st.session_state.wall_start_time = time.time()
+        # 重新随机挑选琥珀，无需重新查询数据库
+        import random
+        if st.session_state.all_ambers:
+            st.session_state.wall_ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -880,7 +947,7 @@ elif st.session_state.mode == "amber_detail":
             )
             with st.chat_message("assistant"):
                 stream = client_init.chat.completions.create(
-                    model=MASTER_MODEL,  # 使用更聪明的模型来严格遵守指令
+                    model=FAST_OPENING_MODEL,  # 使用快速模型生成开场白
                     messages=[
                         {"role": "system", "content": OPENING_PROMPT},
                         {"role": "user", "content": f"琥珀文本：{content}"}
@@ -994,7 +1061,7 @@ elif st.session_state.mode == "chat":
         )
         with st.chat_message("assistant"):
             stream = client_init.chat.completions.create(
-                model=MASTER_MODEL,
+                model=FAST_OPENING_MODEL,  # 使用快速模型生成开场白
                 messages=[
                     {"role": "system", "content": opening_prompt},
                     {"role": "user", "content": f"用户刚刚进入对话，什么都还没说。{context_note}"}
@@ -1026,6 +1093,136 @@ elif st.session_state.mode == "chat":
             conn.close()
         st.session_state.last_user_prompt = prompt
         st.rerun()
+
+# ─── write_amber 模式 ────────────────────────────────────
+
+elif st.session_state.mode == "write_amber":
+    user_id = st.session_state.username
+    
+    if st.button("← 返回首页", key="back_to_gallery"):
+        st.session_state.mode = "gallery"
+        st.rerun()
+    
+    st.markdown("""
+    <div style="text-align:center; padding:48px 0 24px 0;">
+        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0;">写今天的琥珀</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    daily_q = get_daily_question()
+    already_uploaded = check_daily_upload(user_id)
+
+    st.markdown(f"""
+    <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
+        <p style="color:#b4a48a; font-size:13px; margin:0; letter-spacing:0.5px;">{daily_q}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if already_uploaded:
+        st.markdown(
+            "<p style='text-align:center; color:#94a3b8; font-size:13px;'>"
+            "今天的琥珀已经留下了。</p>", unsafe_allow_html=True)
+    else:
+        with st.form("upload_form", clear_on_submit=True):
+            st.markdown("""
+            <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
+                        background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
+                <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
+                    今天只有一次机会。
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多60字）",
+                height=100, max_chars=60, label_visibility="collapsed")
+            anon_choice = st.radio("署名", ["匿名", "留名"],
+                horizontal=True, label_visibility="collapsed")
+            author_name = "匿名"
+            if anon_choice == "留名":
+                author_name = st.text_input("你的名字", max_chars=20)
+            if st.form_submit_button("留下这块琥珀") and amber_text.strip():
+                ok = submit_amber(user_id, amber_text.strip(), author_name, anon_choice == "匿名")
+                if ok:
+                    st.toast("琥珀已成功留下", icon="🪨")
+                    st.session_state.mode = "gallery"
+                    st.rerun()
+                else:
+                    st.warning("今天已经上传过了。")
+
+# ─── my_ambers 模式 ──────────────────────────────────────
+
+elif st.session_state.mode == "my_ambers":
+    user_id = st.session_state.username
+    
+    if st.button("← 返回首页", key="back_from_my_ambers"):
+        st.session_state.mode = "gallery"
+        st.rerun()
+    
+    st.markdown("""
+    <div style="text-align:center; padding:48px 0 24px 0;">
+        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0;">我的琥珀</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 获取用户的所有琥珀，包括收到的信件数
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT a.id, a.content, a.created_at, a.weight,
+               (SELECT COUNT(*) FROM messages WHERE amber_id = a.id AND receiver_id = a.author_id) as message_count
+        FROM ambers a
+        WHERE a.author_id = ?
+        ORDER BY a.created_at DESC
+    """, (user_id,)).fetchall()
+    conn.close()
+    
+    if not rows:
+        st.markdown("<p style='text-align:center; color:#94a3b8; font-size:14px;'>你还没有留下过琥珀。</p>",
+            unsafe_allow_html=True)
+    else:
+        for row in rows:
+            amber_id = row["id"]
+            content = row["content"]
+            created_at = row["created_at"]
+            weight = row["weight"]
+            message_count = row["message_count"]
+            
+            st.markdown(f"""
+            <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
+                        background:rgba(210,180,140,0.15); border:1px solid rgba(180,150,100,0.18);
+                        box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
+                <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 12px 0;">{content}</p>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="color:#b4a48a; font-size:12px;">
+                        {created_at} · 信件: {message_count}
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 删除按钮
+            if st.button(f"删除", key=f"delete_{amber_id}"):
+                # 使用事务删除相关记录
+                conn = get_db()
+                try:
+                    conn.execute("BEGIN TRANSACTION")
+                    # 删除相关的消息
+                    conn.execute("DELETE FROM messages WHERE amber_id = ?", (amber_id,))
+                    # 删除相关的停留记录
+                    conn.execute("DELETE FROM user_affinity WHERE amber_id = ?", (amber_id,))
+                    # 删除相关的每日上传记录
+                    conn.execute("DELETE FROM daily_uploads WHERE amber_id = ?", (amber_id,))
+                    # 删除琥珀本身
+                    conn.execute("DELETE FROM ambers WHERE id = ?", (amber_id,))
+                    conn.execute("COMMIT")
+                    st.toast("琥珀已删除", icon="🗑️")
+                    # 重新加载页面
+                    st.rerun()
+                except Exception as e:
+                    conn.execute("ROLLBACK")
+                    st.error(f"删除失败: {e}")
+                finally:
+                    conn.close()
 
 # ─── AI 回复生成 ──────────────────────────────────────
 
