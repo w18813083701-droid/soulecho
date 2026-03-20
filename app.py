@@ -270,6 +270,12 @@ def init_db():
             "孤独已经是老朋友了，我早就学会了在自己的精神隔间里安然无恙。但偶尔在街上看到他人相拥，还是会被突然击中。我这双手……到底有多久没有触碰过另一个人的体温了？",
             "真正的轻松永远只能来自内在的自洽。那些所谓对自我审视的放弃，总会在某个毫无防备的夜里，像一根倒刺般突然扎进心里。毕竟，潜意识从不撒谎。",
             "我总是习惯钻进潜意识的怀抱里自我抱持，以为那就是最安全的堡垒。可是当真的渴望一双现实的手伸过来时，第一反应却总是刺耳的警报。这种对亲密极度渴望又极度恐惧的拉扯，我往往分不清究竟是在保护自己，还是在囚禁自己。",
+            "当我回忆起她，怀念和怨恨是同时来的。感激她的岁月，也恨她把我当过时尚单品。有的东西，果然只能局限在纸上。",
+            "我一直都很自信，未来的我会更自信一点吗？",
+            "今天看一本书看哭了，忽然明白自己原来一直都有心理问题。但我不甘心。我不想就这么认命，被童年控制一生。",
+            "我其实情感特别充沛，但这又是一个与他人如此遥远的时代。我渴望与他人心贴心畅谈，但似乎每个人都有自己的世界，而我的敏感和泛滥总像个笑话。",
+            "我们还是不要做朋友了，我很悲伤我们始终还是不合适。不过我们还是度过了很美好的四年。你的婚礼我不必出现，而我的人生后半程也不需要你的参与了，祝你仍然有美满的人生。",
+            "当她对我说：'没事呢，我在这呢！有什么话和我说。'结果电话那头的我，哭得更凶了。",
         ]
         for content in seeds:
             c.execute(
@@ -307,6 +313,8 @@ def record_dwell(user_id, amber_id, seconds):
     conn.close()
 
 def check_daily_upload(user_id):
+    if user_id == "rim":
+        return False
     conn = get_db()
     today = date.today().isoformat()
     row = conn.execute(
@@ -1133,8 +1141,8 @@ elif st.session_state.mode == "write_amber":
                 </p>
             </div>
             """, unsafe_allow_html=True)
-            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多60字）",
-                height=100, max_chars=60, label_visibility="collapsed")
+            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
+                height=100, max_chars=100, label_visibility="collapsed")
             anon_choice = st.radio("署名", ["匿名", "留名"],
                 horizontal=True, label_visibility="collapsed")
             author_name = "匿名"
