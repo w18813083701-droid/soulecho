@@ -1,7 +1,7 @@
 import random
 import os
 import time
-import sqlite3
+from supabase import create_client, Client
 from datetime import date
 from openai import OpenAI
 import streamlit as st
@@ -189,71 +189,16 @@ st.markdown("""
 DB_PATH = "soul_echo.db"
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["service_key"]
+    return create_client(url, key)
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            created_at TEXT DEFAULT (date('now'))
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS ambers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            author_id TEXT NOT NULL,
-            author_name TEXT,
-            is_anonymous INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT (date('now')),
-            weight REAL DEFAULT 1.0
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            amber_id INTEGER NOT NULL,
-            sender_id TEXT NOT NULL,
-            receiver_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_read INTEGER DEFAULT 0
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS daily_uploads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            upload_date TEXT NOT NULL,
-            amber_id INTEGER NOT NULL,
-            UNIQUE(user_id, upload_date)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS user_affinity (
-            user_id TEXT NOT NULL,
-            amber_id INTEGER NOT NULL,
-            dwell_seconds REAL DEFAULT 0,
-            PRIMARY KEY (user_id, amber_id)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS daily_questions (
-            question_date TEXT PRIMARY KEY,
-            question TEXT
-        )
-    """)
-    # 插入默认主理人账号
-    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?,?)", ("rim", "rim123"))
-    conn.commit()
+    client = get_db()
     
-    existing = c.execute("SELECT COUNT(*) FROM ambers").fetchone()[0]
+    # 检查 ambers 表是否有数据
+    result = client.table("ambers").select("id", count="exact").execute()
+    existing = result.count
     if existing == 0:
         seeds = [
             "我以前很想让别人注意到我变漂亮了，但是当自己穿着好看的衣服出门又感觉所有人都在注视着我、审判我。我为了自己心里能安静点，之后出门都戴起了口罩、穿上了最丑的衣服。",
@@ -278,51 +223,65 @@ def init_db():
             "当她对我说：'没事呢，我在这呢！有什么话和我说。'结果电话那头的我，哭得更凶了。",
         ]
         for content in seeds:
-            c.execute(
-                "INSERT INTO ambers (content, author_id, author_name, is_anonymous) VALUES (?,?,?,?)",
-                (content, "rim", "rim", 0)
-            )
-    conn.commit()
-    conn.close()
+            client.table("ambers").insert({
+                "content": content,
+                "author_id": "rim",
+                "author_name": "rim",
+                "is_anonymous": 0
+            }).execute()
 
 init_db()
 
 # ─── 工具函数 ─────────────────────────────────────────
 
 def get_ambers_for_wall(user_id, limit=12):
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT a.id, a.content, a.author_id, a.author_name, a.is_anonymous,
-               COALESCE(ua.dwell_seconds, 0) as affinity
-        FROM ambers a
-        LEFT JOIN user_affinity ua ON a.id = ua.amber_id AND ua.user_id = ?
-        ORDER BY (a.weight + COALESCE(ua.dwell_seconds,0)*0.1 + RANDOM()*0.5) DESC
-        LIMIT ?
-    """, (user_id, limit)).fetchall()
-    conn.close()
-    return rows
+    client = get_db()
+    
+    # 获取所有琥珀
+    ambers_result = client.table("ambers").select("id, content, author_id, author_name, is_anonymous, weight").execute()
+    ambers = ambers_result.data
+    
+    # 获取用户的停留时间
+    affinity_result = client.table("user_affinity").select("amber_id, dwell_seconds").eq("user_id", user_id).execute()
+    affinity_dict = {item["amber_id"]: item["dwell_seconds"] for item in affinity_result.data}
+    
+    # 计算排序分数并排序
+    for amber in ambers:
+        dwell_seconds = affinity_dict.get(amber["id"], 0)
+        amber["affinity"] = dwell_seconds
+        amber["score"] = amber["weight"] + dwell_seconds * 0.1 + random.random() * 0.5
+    
+    ambers.sort(key=lambda x: x["score"], reverse=True)
+    
+    return ambers[:limit]
 
 def record_dwell(user_id, amber_id, seconds):
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO user_affinity (user_id, amber_id, dwell_seconds) VALUES (?,?,?)
-        ON CONFLICT(user_id, amber_id)
-        DO UPDATE SET dwell_seconds = dwell_seconds + excluded.dwell_seconds
-    """, (user_id, amber_id, seconds))
-    conn.commit()
-    conn.close()
+    client = get_db()
+    
+    # 检查是否已存在记录
+    existing = client.table("user_affinity").select("dwell_seconds").eq("user_id", user_id).eq("amber_id", amber_id).execute()
+    
+    if existing.data:
+        # 更新现有记录
+        current_seconds = existing.data[0]["dwell_seconds"]
+        client.table("user_affinity").update({
+            "dwell_seconds": current_seconds + seconds
+        }).eq("user_id", user_id).eq("amber_id", amber_id).execute()
+    else:
+        # 插入新记录
+        client.table("user_affinity").insert({
+            "user_id": user_id,
+            "amber_id": amber_id,
+            "dwell_seconds": seconds
+        }).execute()
 
 def check_daily_upload(user_id):
     if user_id == "rim":
         return False
-    conn = get_db()
+    client = get_db()
     today = date.today().isoformat()
-    row = conn.execute(
-        "SELECT id FROM daily_uploads WHERE user_id=? AND upload_date=?",
-        (user_id, today)
-    ).fetchone()
-    conn.close()
-    return row is not None
+    result = client.table("daily_uploads").select("id").eq("user_id", user_id).eq("upload_date", today).execute()
+    return len(result.data) > 0
 
 def _open_amber(amber_id, content, author_id, ambers, user_id):
     dwell = time.time() - st.session_state.get("wall_start_time", time.time())
@@ -337,63 +296,67 @@ def _open_amber(amber_id, content, author_id, ambers, user_id):
     st.session_state.opening_initialized = False
 
 def submit_amber(user_id, content, author_name, is_anonymous):
-    conn = get_db()
+    client = get_db()
     today = date.today().isoformat()
     try:
-        c = conn.cursor()
-        c.execute(
-            "INSERT INTO ambers (content, author_id, author_name, is_anonymous) VALUES (?,?,?,?)",
-            (content, user_id, author_name, 1 if is_anonymous else 0)
-        )
-        amber_id = c.lastrowid
-        c.execute(
-            "INSERT INTO daily_uploads (user_id, upload_date, amber_id) VALUES (?,?,?)",
-            (user_id, today, amber_id)
-        )
-        conn.commit()
+        # 插入琥珀
+        amber_result = client.table("ambers").insert({
+            "content": content,
+            "author_id": user_id,
+            "author_name": author_name,
+            "is_anonymous": 1 if is_anonymous else 0
+        }).execute()
+        amber_id = amber_result.data[0]["id"]
+        
+        # 插入每日上传记录
+        client.table("daily_uploads").insert({
+            "user_id": user_id,
+            "upload_date": today,
+            "amber_id": amber_id
+        }).execute()
+        
         # 上传成功后重新加载琥珀列表
         st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
         return True
-    except sqlite3.IntegrityError:
+    except Exception:
         return False
-    finally:
-        conn.close()
 
 def send_message(amber_id, sender_id, receiver_id, content):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO messages (amber_id, sender_id, receiver_id, content) VALUES (?,?,?,?)",
-        (amber_id, sender_id, receiver_id, content)
-    )
-    conn.commit()
-    conn.close()
+    client = get_db()
+    client.table("messages").insert({
+        "amber_id": amber_id,
+        "sender_id": sender_id,
+        "receiver_id": receiver_id,
+        "content": content
+    }).execute()
 
 def get_inbox(user_id):
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT m.id, m.content, m.created_at, m.is_read, a.content as amber_content
-        FROM messages m
-        JOIN ambers a ON m.amber_id = a.id
-        WHERE m.receiver_id = ?
-        ORDER BY m.created_at DESC
-    """, (user_id,)).fetchall()
-    conn.close()
-    return rows
+    client = get_db()
+    
+    # 获取用户收到的所有消息
+    messages_result = client.table("messages").select("id, content, created_at, is_read, amber_id").eq("receiver_id", user_id).order("created_at", desc=True).execute()
+    messages = messages_result.data
+    
+    # 获取相关的琥珀内容
+    amber_ids = [msg["amber_id"] for msg in messages]
+    if amber_ids:
+        ambers_result = client.table("ambers").select("id, content").in_("id", amber_ids).execute()
+        amber_dict = {item["id"]: item["content"] for item in ambers_result.data}
+        
+        # 将琥珀内容添加到消息中
+        for msg in messages:
+            msg["amber_content"] = amber_dict.get(msg["amber_id"], "")
+    
+    return messages
 
 def mark_read(message_id):
-    conn = get_db()
-    conn.execute("UPDATE messages SET is_read=1 WHERE id=?", (message_id,))
-    conn.commit()
-    conn.close()
+    client = get_db()
+    client.table("messages").update({"is_read": 1}).eq("id", message_id).execute()
 
 def get_unread_count(user_id):
-    conn = get_db()
-    count = conn.execute(
-        "SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0",
-        (user_id,)
-    ).fetchone()[0]
-    conn.close()
-    return count
+    client = get_db()
+    result = client.table("messages").select("id", count="exact").eq("receiver_id", user_id).eq("is_read", 0).execute()
+    return result.count
 
 # ─── Prompts ──────────────────────────────────────────
 
@@ -586,14 +549,10 @@ SOUL_OBSERVER_PROMPT = """
 
 def get_daily_question():
     today = date.today().isoformat()
-    conn = get_db()
-    row = conn.execute(
-        "SELECT question FROM daily_questions WHERE question_date=?",
-        (today,)
-    ).fetchone()
-    conn.close()
-    if row:
-        return row["question"]
+    client = get_db()
+    result = client.table("daily_questions").select("question").eq("question_date", today).execute()
+    if result.data:
+        return result.data[0]["question"]
     try:
         client = OpenAI(
             api_key=st.secrets["siliconflow"]["api_key"],
@@ -680,12 +639,9 @@ if st.session_state.username is None:
             if login_username and login_password:
                 # 清理用户名：去除前后空格并转为小写
                 cleaned_username = login_username.strip().lower()
-                conn = get_db()
-                user = conn.execute(
-                    "SELECT * FROM users WHERE username=? AND password=?",
-                    (cleaned_username, login_password)
-                ).fetchone()
-                conn.close()
+                client = get_db()
+                result = client.table("users").select("*").eq("username", cleaned_username).eq("password", login_password).execute()
+                user = result.data[0] if result.data else None
                 if user:
                     st.session_state.username = user["username"]
                     st.rerun()
@@ -701,19 +657,16 @@ if st.session_state.username is None:
             if reg_username and reg_password:
                 # 清理用户名：去除前后空格并转为小写
                 cleaned_username = reg_username.strip().lower()
-                conn = get_db()
+                client = get_db()
                 try:
-                    conn.execute(
-                        "INSERT INTO users (username, password) VALUES (?,?)",
-                        (cleaned_username, reg_password)
-                    )
-                    conn.commit()
-                    conn.close()
+                    client.table("users").insert({
+                        "username": cleaned_username,
+                        "password": reg_password
+                    }).execute()
                     st.session_state.username = cleaned_username
                     st.success("注册成功！")
                     st.rerun()
-                except sqlite3.IntegrityError:
-                    conn.close()
+                except Exception:
                     st.error("这个昵称已经被使用了")
             else:
                 st.warning("请输入昵称和密码")
@@ -843,11 +796,13 @@ if st.session_state.mode == "gallery":
         for i, row in enumerate(ambers[:4]):
             amber_id = row["id"]
             content = row["content"]
-            # 特殊处理：rim的琥珀统一显示为匿名
-            if row["author_id"] == "rim":
+            # 根据 is_anonymous 判断显示名称
+            if row["is_anonymous"] == 1:
                 display_name = "匿名"
+            elif row["author_id"] == st.session_state.username:
+                display_name = st.session_state.username
             else:
-                display_name = st.session_state.username if row["author_id"] == st.session_state.username else ("匿名" if row["is_anonymous"] else (row["author_name"] or "匿名"))
+                display_name = row["author_name"] or "匿名"
             
             # 悬念截断：找第一个标点停顿截断，最多25字
             import re
@@ -980,11 +935,8 @@ elif st.session_state.mode == "amber_detail":
             st.session_state.messages.append({"role": "user", "content": prompt})
             # 交互次数更新weight
             if st.session_state.mode == "amber_detail" and st.session_state.get("current_amber_id"):
-                _conn = get_db()
-                _conn.execute("UPDATE ambers SET weight = weight + 0.1 WHERE id = ?",
-                              (st.session_state.current_amber_id,))
-                _conn.commit()
-                _conn.close()
+                client = get_db()
+                client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
             st.session_state.last_user_prompt = prompt
             st.rerun()
 
@@ -1094,11 +1046,8 @@ elif st.session_state.mode == "chat":
         st.session_state.messages.append({"role": "user", "content": prompt})
         # 每次用户发消息，给当前琥珀的weight +0.1
         if st.session_state.mode == "amber_detail":
-            conn = get_db()
-            conn.execute("UPDATE ambers SET weight = weight + 0.1 WHERE id = ?", 
-                         (st.session_state.current_amber_id,))
-            conn.commit()
-            conn.close()
+            client = get_db()
+            client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
         st.session_state.last_user_prompt = prompt
         st.rerun()
 
@@ -1174,15 +1123,31 @@ elif st.session_state.mode == "my_ambers":
     """, unsafe_allow_html=True)
     
     # 获取用户的所有琥珀，包括收到的信件数
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT a.id, a.content, a.created_at, a.weight,
-               (SELECT COUNT(*) FROM messages WHERE amber_id = a.id AND receiver_id = a.author_id) as message_count
-        FROM ambers a
-        WHERE a.author_id = ?
-        ORDER BY a.created_at DESC
-    """, (user_id,)).fetchall()
-    conn.close()
+    client = get_db()
+    
+    # 获取用户的所有琥珀
+    ambers_result = client.table("ambers").select("id, content, created_at, weight, author_id").eq("author_id", user_id).order("created_at", desc=True).execute()
+    rows = ambers_result.data
+    
+    # 获取每个琥珀的消息数量
+    if rows:
+        amber_ids = [row["id"] for row in rows]
+        messages_result = client.table("messages").select("amber_id").in_("amber_id", amber_ids).eq("receiver_id", user_id).execute()
+        
+        # 创建消息计数字典
+        message_counts = {}
+        for msg in messages_result.data:
+            amber_id = msg["amber_id"]
+            if amber_id in message_counts:
+                message_counts[amber_id] += 1
+            else:
+                message_counts[amber_id] = 1
+        
+        # 将消息计数添加到琥珀数据中
+        for row in rows:
+            row["message_count"] = message_counts.get(row["id"], 0)
+    else:
+        rows = []
     
     if not rows:
         st.markdown("<p style='text-align:center; color:#94a3b8; font-size:14px;'>你还没有留下过琥珀。</p>",
@@ -1211,26 +1176,21 @@ elif st.session_state.mode == "my_ambers":
             # 删除按钮
             if st.button(f"删除", key=f"delete_{amber_id}"):
                 # 使用事务删除相关记录
-                conn = get_db()
+                client = get_db()
                 try:
-                    conn.execute("BEGIN TRANSACTION")
                     # 删除相关的消息
-                    conn.execute("DELETE FROM messages WHERE amber_id = ?", (amber_id,))
+                    client.table("messages").delete().eq("amber_id", amber_id).execute()
                     # 删除相关的停留记录
-                    conn.execute("DELETE FROM user_affinity WHERE amber_id = ?", (amber_id,))
+                    client.table("user_affinity").delete().eq("amber_id", amber_id).execute()
                     # 删除相关的每日上传记录
-                    conn.execute("DELETE FROM daily_uploads WHERE amber_id = ?", (amber_id,))
+                    client.table("daily_uploads").delete().eq("amber_id", amber_id).execute()
                     # 删除琥珀本身
-                    conn.execute("DELETE FROM ambers WHERE id = ?", (amber_id,))
-                    conn.execute("COMMIT")
+                    client.table("ambers").delete().eq("id", amber_id).execute()
                     st.toast("琥珀已删除", icon="🗑️")
                     # 重新加载页面
                     st.rerun()
                 except Exception as e:
-                    conn.execute("ROLLBACK")
                     st.error(f"删除失败: {e}")
-                finally:
-                    conn.close()
 
 # ─── AI 回复生成 ──────────────────────────────────────
 
