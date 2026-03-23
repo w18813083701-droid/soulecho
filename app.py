@@ -329,11 +329,15 @@ def record_dwell(user_id, amber_id, seconds):
 
 def check_daily_upload(user_id):
     if user_id == "rim":
-        return False
+        return 0
     client = get_db()
     today = date.today().isoformat()
     result = client.table("daily_uploads").select("id").eq("user_id", user_id).eq("upload_date", today).execute()
-    return len(result.data) > 0
+    return len(result.data)
+
+def get_daily_quota(user_id):
+    """获取用户每日免费琥珀额度，订阅用户5颗，普通用户2颗"""
+    return 5 if is_subscribed(user_id) else 2
 
 def _open_amber(amber_id, content, author_id, ambers, user_id):
     dwell = time.time() - st.session_state.get("wall_start_time", time.time())
@@ -347,11 +351,16 @@ def _open_amber(amber_id, content, author_id, ambers, user_id):
     st.session_state.messages = []
     st.session_state.opening_initialized = False
 
-def submit_amber(user_id, content, author_name, is_anonymous):
+def submit_amber(user_id, content, author_name, is_anonymous, is_extra=False):
     client = get_db()
     today = date.today().isoformat()
     try:
-        # 插入琥珀
+        if is_extra:
+            current_points = get_user_points(user_id)
+            if current_points < 20:
+                return False
+            client.table("users").update({"points": current_points - 20}).eq("username", user_id).execute()
+            client.table("point_ledger").insert({"user_id": user_id, "delta": -20, "reason": "extra_amber"}).execute()
         amber_result = client.table("ambers").insert({
             "content": content,
             "author_id": user_id,
@@ -359,15 +368,11 @@ def submit_amber(user_id, content, author_name, is_anonymous):
             "is_anonymous": 1 if is_anonymous else 0
         }).execute()
         amber_id = amber_result.data[0]["id"]
-        
-        # 插入每日上传记录
         client.table("daily_uploads").insert({
             "user_id": user_id,
             "upload_date": today,
             "amber_id": amber_id
         }).execute()
-        
-        # 上传成功后重新加载琥珀列表
         st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
         return True
     except Exception:
@@ -382,22 +387,128 @@ def send_message(amber_id, sender_id, receiver_id, content):
         "content": content
     }).execute()
 
+def try_earn_comment_points(user_id, amber_id):
+    """用户给琥珀写信时尝试赚积分，同一用户对同一琥珀只能赚一次，每日上限10次"""
+    client = get_db()
+    # 检查是否已经赚过
+    already = client.table("comment_rewards").select("id").eq("user_id", user_id).eq("amber_id", amber_id).execute()
+    if already.data:
+        return False
+    # 检查今日已赚次数
+    today = date.today().isoformat()
+    today_rewards = client.table("point_ledger").select("id", count="exact").eq("user_id", user_id).eq("reason", "write_comment").gte("created_at", today).execute()
+    if today_rewards.count >= 10:
+        return False
+    # 赚积分
+    client.table("comment_rewards").insert({"user_id": user_id, "amber_id": amber_id}).execute()
+    client.table("point_ledger").insert({"user_id": user_id, "delta": 10, "reason": "write_comment", "ref_id": amber_id}).execute()
+    client.table("users").update({"points": get_user_points(user_id) + 10}).eq("username", user_id).execute()
+    return True
+
+def get_user_points(user_id):
+    """获取用户当前积分"""
+    client = get_db()
+    result = client.table("users").select("points").eq("username", user_id).execute()
+    if result.data:
+        return result.data[0]["points"]
+    return 0
+
+def is_subscribed(user_id):
+    """判断用户是否订阅"""
+    client = get_db()
+    result = client.table("users").select("is_subscribed").eq("username", user_id).execute()
+    if result.data:
+        return result.data[0].get("is_subscribed", False)
+    return False
+
+def light_up_comment(message_id, sender_id, amber_id):
+    """琥珀主人点亮留言，给留言者额外赚10积分，每条留言只能点亮一次"""
+    client = get_db()
+    # 检查是否已点亮
+    msg = client.table("messages").select("is_lit").eq("id", message_id).execute()
+    if not msg.data or msg.data[0].get("is_lit"):
+        return False
+    # 标记已点亮
+    client.table("messages").update({"is_lit": True}).eq("id", message_id).execute()
+    # 给留言者加积分
+    client.table("point_ledger").insert({"user_id": sender_id, "delta": 10, "reason": "comment_lit", "ref_id": message_id}).execute()
+    client.table("users").update({"points": get_user_points(sender_id) + 10}).eq("username", sender_id).execute()
+    return True
+
+def can_reply_free(user_id, amber_id, other_user_id):
+    """判断这对用户在这块琥珀下是否还有免费回信机会。
+    规则：同一对用户针对同一块琥珀，来回总次数超过1次后需要花积分。"""
+    client = get_db()
+    result = client.table("messages").select("id", count="exact").eq("amber_id", amber_id).or_(
+        f"and(sender_id.eq.{user_id},receiver_id.eq.{other_user_id}),and(sender_id.eq.{other_user_id},receiver_id.eq.{user_id})"
+    ).execute()
+    return result.count <= 1
+
+def deduct_stamp(user_id):
+    """扣除10积分邮票，订阅用户免费，返回是否成功"""
+    if is_subscribed(user_id):
+        return True
+    client = get_db()
+    current = get_user_points(user_id)
+    if current < 10:
+        return False
+    client.table("users").update({"points": current - 10}).eq("username", user_id).execute()
+    client.table("point_ledger").insert({"user_id": user_id, "delta": -10, "reason": "stamp"}).execute()
+    return True
+
+def get_active_users(exclude_user_id):
+    from datetime import datetime, timedelta
+    client = get_db()
+    three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
+    result = client.table("users").select("username").neq("username", exclude_user_id).gte("last_active", three_days_ago).execute()
+    return [row["username"] for row in result.data]
+
+def send_post(sender_id, content):
+    import random
+    client = get_db()
+    current = get_user_points(sender_id)
+    if current < 30:
+        return False, "积分不足"
+    active_users = get_active_users(sender_id)
+    if not active_users:
+        return False, "暂时没有可以接收漂流信的用户，请稍后再试"
+    receiver_id = random.choice(active_users)
+    client.table("users").update({"points": current - 30}).eq("username", sender_id).execute()
+    client.table("point_ledger").insert({"user_id": sender_id, "delta": -30, "reason": "post"}).execute()
+    client.table("posts").insert({"sender_id": sender_id, "receiver_id": receiver_id, "content": content}).execute()
+    return True, "已寄出"
+
+def check_post_refunds(user_id):
+    from datetime import datetime
+    client = get_db()
+    now = datetime.now().isoformat()
+    expired = client.table("posts").select("id").eq("sender_id", user_id).eq("is_replied", False).lt("expires_at", now).execute()
+    if not expired.data:
+        return
+    for post in expired.data:
+        current = get_user_points(user_id)
+        client.table("users").update({"points": current + 15}).eq("username", user_id).execute()
+        client.table("point_ledger").insert({"user_id": user_id, "delta": 15, "reason": "post_refund", "ref_id": str(post["id"])}).execute()
+        client.table("posts").delete().eq("id", post["id"]).execute()
+
 def get_inbox(user_id):
     client = get_db()
     
     # 获取用户收到的所有消息
-    messages_result = client.table("messages").select("id, content, created_at, is_read, amber_id").eq("receiver_id", user_id).order("created_at", desc=True).execute()
+    messages_result = client.table("messages").select("id, content, created_at, is_read, amber_id, is_lit, sender_id").eq("receiver_id", user_id).order("created_at", desc=True).execute()
     messages = messages_result.data
     
     # 获取相关的琥珀内容
     amber_ids = [msg["amber_id"] for msg in messages]
     if amber_ids:
-        ambers_result = client.table("ambers").select("id, content").in_("id", amber_ids).execute()
+        ambers_result = client.table("ambers").select("id, content, author_id").in_("id", amber_ids).execute()
         amber_dict = {item["id"]: item["content"] for item in ambers_result.data}
+        amber_author_dict = {item["id"]: item["author_id"] for item in ambers_result.data}
         
         # 将琥珀内容添加到消息中
         for msg in messages:
             msg["amber_content"] = amber_dict.get(msg["amber_id"], "")
+            msg["amber_author_id"] = amber_author_dict.get(msg["amber_id"], "")
     
     return messages
 
@@ -409,6 +520,13 @@ def get_unread_count(user_id):
     client = get_db()
     result = client.table("messages").select("id", count="exact").eq("receiver_id", user_id).eq("is_read", 0).execute()
     return result.count
+
+def get_user_points(user_id):
+    client = get_db()
+    result = client.table("users").select("points").eq("username", user_id).execute()
+    if result.data:
+        return result.data[0]["points"]
+    return 0
 
 # ─── Prompts（从 Supabase 动态加载） ──────────────────── 
 
@@ -521,6 +639,8 @@ if st.session_state.username is None:
                 user = result.data[0] if result.data else None
                 if user:
                     st.session_state.username = user["username"]
+                    from datetime import datetime
+                    get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", user["username"]).execute()
                     st.rerun()
                 else:
                     st.error("昵称或密码错误")
@@ -563,6 +683,12 @@ if "prompts_warmed" not in st.session_state:
 
 with st.sidebar:
     user_id = st.session_state.username
+    points = get_user_points(user_id)
+    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{points}</p>", unsafe_allow_html=True)
+    if is_subscribed(user_id):
+        st.markdown(
+            "<p style='font-size:12px; color:#b4a48a; margin:0;'>订阅中 ✦</p>",
+            unsafe_allow_html=True)
     if st.session_state.mode in ["chat", "amber_detail", "inbox"]:
         if st.button("← 首页", key="back_home"):
             st.session_state.mode = "gallery"
@@ -613,7 +739,7 @@ if st.session_state.mode == "gallery":
             st.rerun()
 
     daily_q = get_daily_question()
-    already_uploaded = check_daily_upload(user_id)
+    today_upload_count = check_daily_upload(user_id)
 
     st.markdown(f"""
     <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
@@ -621,15 +747,30 @@ if st.session_state.mode == "gallery":
     </div>
     """, unsafe_allow_html=True)
 
-    if already_uploaded:
+    quota = get_daily_quota(user_id)
+    if today_upload_count >= quota:
+        user_points = get_user_points(user_id)
         st.markdown(
-            "<p style='text-align:center; color:#94a3b8; font-size:13px;'>"
-            "今天的琥珀已经留下了。</p>", unsafe_allow_html=True)
+            f"<p style='text-align:center; color:#94a3b8; font-size:13px;'>"
+            f"今天已留下{today_upload_count}块琥珀。再发一块需要消耗20积分（当前积分：{user_points}）。</p>",
+            unsafe_allow_html=True)
+        if user_points >= 20:
+            col_w, col_s = st.columns([2, 3])
+            with col_w:
+                if st.button("再写一块（-20积分）", key="open_upload"):
+                    st.session_state.mode = "write_amber"
+                    st.session_state.extra_amber = True
+                    st.rerun()
+        else:
+            st.markdown(
+                "<p style='text-align:center; color:#94a3b8; font-size:13px;'>积分不足，无法再发。</p>",
+                unsafe_allow_html=True)
     else:
         col_w, col_s = st.columns([2, 3])
         with col_w:
             if st.button("写今天的琥珀", key="open_upload"):
                 st.session_state.mode = "write_amber"
+                st.session_state.extra_amber = False
                 st.rerun()
 
     # 隐藏入口：刷够次数就在视线范围内出现
@@ -842,11 +983,27 @@ elif st.session_state.mode == "amber_detail":
             else:
                 letter = st.text_area("", placeholder="只有对方能看见……",
                     height=120, label_visibility="collapsed")
-                submit_button = st.form_submit_button("寄出去")
+                is_free_send = can_reply_free(user_id, amber_id, author_id)
+                user_points_now = get_user_points(user_id)
+                if not is_free_send:
+                    st.markdown(
+                        f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points_now}）</p>",
+                        unsafe_allow_html=True)
+                label_send = "寄出去（-10积分）" if not is_free_send else "寄出去"
+                submit_button = st.form_submit_button(label_send)
                 if submit_button:
                     if letter.strip():
+                        if not is_free_send:
+                            ok = deduct_stamp(user_id)
+                            if not ok:
+                                st.warning("积分不足，无法续信。")
+                                st.stop()
                         send_message(amber_id, user_id, author_id, letter.strip())
-                        st.toast("信件已稳妥寄出", icon="🕊️")
+                        earned = try_earn_comment_points(user_id, amber_id) if is_free_send else False
+                        if earned:
+                            st.toast("信件已稳妥寄出，获得10积分 🪙", icon="🕊️")
+                        else:
+                            st.toast("信件已稳妥寄出", icon="🕊️")
                     else:
                         st.warning("还没写什么内容。")
 
@@ -871,6 +1028,8 @@ elif st.session_state.mode == "inbox":
             mark_read(letter["id"])
             amber_preview = letter["amber_content"][:40] + "……" \
                 if len(letter["amber_content"]) > 40 else letter["amber_content"]
+            is_lit = letter.get("is_lit", False)
+            is_own_amber = letter.get("amber_author_id") == user_id
             st.markdown(f"""
             <div style="padding:18px 22px; margin-bottom:14px; border-radius:10px;
                         background:rgba(0,0,0,0.02); border:1px solid rgba(0,0,0,0.06);">
@@ -882,9 +1041,46 @@ elif st.session_state.mode == "inbox":
                 </p>
                 <p style="color:#94a3b8; font-size:11px; margin:8px 0 0 0;">
                     {str(letter["created_at"])[:10]}
+                    {"　✦ 已点亮" if is_lit else ""}
                 </p>
             </div>
             """, unsafe_allow_html=True)
+            if is_own_amber and not is_lit:
+                if st.button("点亮这封信", key=f"lit_{letter['id']}"):
+                    light_up_comment(letter["id"], letter.get("sender_id"), letter["amber_id"])
+                    st.toast("已点亮，对方获得10积分 ✦")
+                    st.rerun()
+            # 回信入口（收件人可以回信给发件人）
+            sender = letter.get("sender_id")
+            if sender and sender != user_id:
+                is_free = can_reply_free(user_id, letter["amber_id"], sender)
+                user_points = get_user_points(user_id)
+                with st.expander("回信"):
+                    if not is_free and user_points < 10:
+                        st.markdown(
+                            "<p style='color:#94a3b8; font-size:13px;'>续信需要10积分邮票，当前积分不足。</p>",
+                            unsafe_allow_html=True)
+                    else:
+                        if not is_free:
+                            st.markdown(
+                                f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points}）</p>",
+                                unsafe_allow_html=True)
+                        with st.form(key=f"reply_form_{letter['id']}", clear_on_submit=True):
+                            reply_text = st.text_area("", placeholder="写下回信……", height=100,
+                                label_visibility="collapsed")
+                            label = "寄出去（-10积分）" if not is_free else "寄出去"
+                            if st.form_submit_button(label):
+                                if reply_text.strip():
+                                    if not is_free:
+                                        ok = deduct_stamp(user_id)
+                                        if not ok:
+                                            st.warning("积分不足，无法续信。")
+                                            st.stop()
+                                    send_message(letter["amber_id"], user_id, sender, reply_text.strip())
+                                    st.toast("回信已寄出", icon="🕊️")
+                                    st.rerun()
+                                else:
+                                    st.warning("还没写什么内容。")
 
 # ─── chat 模式（direct_vent）────────────────────────────
 
@@ -987,7 +1183,8 @@ elif st.session_state.mode == "write_amber":
             if anon_choice == "留名":
                 author_name = st.text_input("你的名字", max_chars=20)
             if st.form_submit_button("留下这块琥珀") and amber_text.strip():
-                ok = submit_amber(user_id, amber_text.strip(), author_name, anon_choice == "匿名")
+                is_extra = st.session_state.get("extra_amber", False)
+                ok = submit_amber(user_id, amber_text.strip(), author_name, anon_choice == "匿名", is_extra=is_extra)
                 if ok:
                     st.toast("琥珀已成功留下", icon="🪨")
                     st.session_state.mode = "gallery"
