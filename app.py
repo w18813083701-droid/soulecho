@@ -471,7 +471,7 @@ def send_post(sender_id, content):
         return False, "积分不足"
     active_users = get_active_users(sender_id)
     if not active_users:
-        return False, "暂时没有可以接收漂流信的用户，请稍后再试"
+        return False, "暂时没有可以接收帖的用户，请稍后再试"
     receiver_id = random.choice(active_users)
     client.table("users").update({"points": current - 30}).eq("username", sender_id).execute()
     client.table("point_ledger").insert({"user_id": sender_id, "delta": -30, "reason": "post"}).execute()
@@ -499,7 +499,7 @@ def get_inbox(user_id):
     messages = messages_result.data
     
     # 获取相关的琥珀内容
-    amber_ids = [msg["amber_id"] for msg in messages]
+    amber_ids = [msg["amber_id"] for msg in messages if msg["amber_id"] is not None]
     if amber_ids:
         ambers_result = client.table("ambers").select("id, content, author_id").in_("id", amber_ids).execute()
         amber_dict = {item["id"]: item["content"] for item in ambers_result.data}
@@ -507,8 +507,8 @@ def get_inbox(user_id):
         
         # 将琥珀内容添加到消息中
         for msg in messages:
-            msg["amber_content"] = amber_dict.get(msg["amber_id"], "")
-            msg["amber_author_id"] = amber_author_dict.get(msg["amber_id"], "")
+            msg["amber_content"] = amber_dict.get(msg["amber_id"], "") if msg["amber_id"] else ""
+            msg["amber_author_id"] = amber_author_dict.get(msg["amber_id"], "") if msg["amber_id"] else ""
     
     return messages
 
@@ -521,12 +521,7 @@ def get_unread_count(user_id):
     result = client.table("messages").select("id", count="exact").eq("receiver_id", user_id).eq("is_read", 0).execute()
     return result.count
 
-def get_user_points(user_id):
-    client = get_db()
-    result = client.table("users").select("points").eq("username", user_id).execute()
-    if result.data:
-        return result.data[0]["points"]
-    return 0
+
 
 # ─── Prompts（从 Supabase 动态加载） ──────────────────── 
 
@@ -683,9 +678,11 @@ if "prompts_warmed" not in st.session_state:
 
 with st.sidebar:
     user_id = st.session_state.username
-    points = get_user_points(user_id)
-    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{points}</p>", unsafe_allow_html=True)
-    if is_subscribed(user_id):
+    _user_info = get_db().table("users").select("points, is_subscribed").eq("username", user_id).execute()
+    _points = _user_info.data[0]["points"] if _user_info.data else 0
+    _subbed = _user_info.data[0].get("is_subscribed", False) if _user_info.data else False
+    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{_points}</p>", unsafe_allow_html=True)
+    if _subbed:
         st.markdown(
             "<p style='font-size:12px; color:#b4a48a; margin:0;'>订阅中 ✦</p>",
             unsafe_allow_html=True)
@@ -710,6 +707,10 @@ with st.sidebar:
     
     if st.button("我的琥珀", key="my_ambers"):
         st.session_state.mode = "my_ambers"
+        st.rerun()
+
+    if st.button("发一个帖", key="write_post"):
+        st.session_state.mode = "write_post"
         st.rerun()
     
 # ─── gallery 模式 ─────────────────────────────────────
@@ -1019,6 +1020,43 @@ elif st.session_state.mode == "inbox":
         "<h3 style='font-weight:300; letter-spacing:3px; margin-bottom:24px;'>收件箱</h3>",
         unsafe_allow_html=True)
 
+    check_post_refunds(user_id)
+
+    client_db = get_db()
+    posts_received = client_db.table("posts").select("id, content, created_at, is_replied, sender_id").eq("receiver_id", user_id).order("created_at", desc=True).execute()
+    if posts_received.data:
+        st.markdown(
+            "<p style='color:#b4a48a; font-size:13px; letter-spacing:1px; margin-bottom:12px;'>帖</p>",
+            unsafe_allow_html=True)
+        for post in posts_received.data:
+            st.markdown(f"""
+            <div style="padding:18px 22px; margin-bottom:14px; border-radius:10px;
+                        background:rgba(180,150,100,0.08); border:1px solid rgba(180,150,100,0.2);">
+                <p style="color:#1a1a1a; font-size:15px; line-height:1.8; margin:0;">
+                    {post["content"]}
+                </p>
+                <p style="color:#94a3b8; font-size:11px; margin:8px 0 0 0;">
+                    {str(post["created_at"])[:10]} · 来自陌生人
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            if not post["is_replied"]:
+                with st.expander("回信"):
+                    with st.form(key=f"post_reply_{post['id']}", clear_on_submit=True):
+                        reply_text = st.text_area("", placeholder="写下回信……", height=100,
+                            label_visibility="collapsed")
+                        if st.form_submit_button("寄出去"):
+                            if reply_text.strip():
+                                send_message(None, user_id, post["sender_id"], reply_text.strip())
+                                client_db.table("posts").update({"is_replied": True}).eq("id", post["id"]).execute()
+                                st.toast("回信已寄出", icon="🕊️")
+                                st.rerun()
+                            else:
+                                st.warning("还没写什么内容。")
+        st.markdown(
+            "<hr style='border:0; border-top:1px solid rgba(0,0,0,0.06); margin:16px 0;'>",
+            unsafe_allow_html=True)
+
     letters = get_inbox(user_id)
     if not letters:
         st.markdown("<p style='color:#94a3b8; font-size:14px;'>还没有人给你写信。</p>",
@@ -1026,8 +1064,8 @@ elif st.session_state.mode == "inbox":
     else:
         for letter in letters:
             mark_read(letter["id"])
-            amber_preview = letter["amber_content"][:40] + "……" \
-                if len(letter["amber_content"]) > 40 else letter["amber_content"]
+            amber_content = letter.get("amber_content") or ""
+            amber_preview = amber_content[:40] + "……" if len(amber_content) > 40 else amber_content
             is_lit = letter.get("is_lit", False)
             is_own_amber = letter.get("amber_author_id") == user_id
             st.markdown(f"""
@@ -1153,7 +1191,8 @@ elif st.session_state.mode == "write_amber":
     """, unsafe_allow_html=True)
     
     daily_q = get_daily_question()
-    already_uploaded = check_daily_upload(user_id)
+    today_count = check_daily_upload(user_id)
+    quota = get_daily_quota(user_id)
 
     st.markdown(f"""
     <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
@@ -1161,17 +1200,17 @@ elif st.session_state.mode == "write_amber":
     </div>
     """, unsafe_allow_html=True)
 
-    if already_uploaded:
+    if today_count >= quota:
         st.markdown(
             "<p style='text-align:center; color:#94a3b8; font-size:13px;'>"
-            "今天的琥珀已经留下了。</p>", unsafe_allow_html=True)
+            "今天的琥珀额度已用完。</p>", unsafe_allow_html=True)
     else:
         with st.form("upload_form", clear_on_submit=True):
             st.markdown("""
             <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
                         background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
                 <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
-                    今天只有一次机会。
+                    每天有两次机会，用心留下。
                 </p>
             </div>
             """, unsafe_allow_html=True)
@@ -1277,6 +1316,48 @@ elif st.session_state.mode == "my_ambers":
                     st.rerun()
                 except Exception as e:
                     st.error(f"删除失败: {e}")
+
+# ─── write_post 模式 ─────────────────────────────────────
+
+elif st.session_state.mode == "write_post":
+    user_id = st.session_state.username
+    if st.button("← 返回", key="back_from_post"):
+        st.session_state.mode = "gallery"
+        st.rerun()
+
+    st.markdown("""
+    <div style="text-align:center; padding:48px 0 24px 0;">
+        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0;">帖</h1>
+    </div>
+    """, unsafe_allow_html=True)
+
+    user_points = get_user_points(user_id)
+    st.markdown(f"""
+    <div style="max-width:500px; margin:0 auto 24px auto; text-align:center;">
+        <p style="color:#b4a48a; font-size:13px; margin:0; line-height:1.8;">
+            写下此刻想说的话，随机落到一个陌生人的信箱。消耗30积分。三天内无人回复，退还15积分。
+            当前积分：{user_points}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if user_points < 30:
+        st.markdown(
+            "<p style='text-align:center; color:#94a3b8; font-size:13px;'>积分不足，无法发送帖。</p>",
+            unsafe_allow_html=True)
+    else:
+        with st.form("post_form", clear_on_submit=True):
+            post_text = st.text_area("", placeholder="此刻最想让某个陌生人听到的话……（最多100字）",
+                height=120, max_chars=100, label_visibility="collapsed")
+            if st.form_submit_button("放它漂走") and post_text.strip():
+                ok, msg = send_post(user_id, post_text.strip())
+                if ok:
+                    st.toast("帖已寄出 🕊️")
+                    st.session_state.mode = "gallery"
+                    st.rerun()
+                else:
+                    st.warning(msg)
 
 # ─── AI 回复生成 ──────────────────────────────────────
 
