@@ -288,23 +288,9 @@ init_db()
 
 def get_ambers_for_wall(user_id, limit=12):
     client = get_db()
-    
-    # 获取所有琥珀
     ambers_result = client.table("ambers").select("id, content, author_id, author_name, is_anonymous, weight").execute()
     ambers = ambers_result.data
-    
-    # 获取用户的停留时间
-    affinity_result = client.table("user_affinity").select("amber_id, dwell_seconds").eq("user_id", user_id).execute()
-    affinity_dict = {item["amber_id"]: item["dwell_seconds"] for item in affinity_result.data}
-    
-    # 计算排序分数并排序
-    for amber in ambers:
-        dwell_seconds = affinity_dict.get(amber["id"], 0)
-        amber["affinity"] = dwell_seconds
-        amber["score"] = amber["weight"] + dwell_seconds * 0.1 + random.random() * 0.5
-    
-    ambers.sort(key=lambda x: x["score"], reverse=True)
-    
+    random.shuffle(ambers)
     return ambers[:limit]
 
 def record_dwell(user_id, amber_id, seconds):
@@ -598,6 +584,10 @@ if "from_amber_redirect" not in st.session_state:
     st.session_state.from_amber_redirect = False
 if "entry_path" not in st.session_state:
     st.session_state.entry_path = None
+if "show_write_panel" not in st.session_state:
+    st.session_state.show_write_panel = False
+if "write_panel_mode" not in st.session_state:
+    st.session_state.write_panel_mode = None
 
 # ─── 登录/注册逻辑 ────────────────────────────────────
 
@@ -713,6 +703,14 @@ with st.sidebar:
         st.session_state.mode = "write_post"
         st.rerun()
     
+    if st.button("和AI聊", key="open_chat"):
+        st.session_state.mode = "chat"
+        st.session_state.entry_path = "direct_vent"
+        st.session_state.messages = []
+        st.session_state.opening_initialized = False
+        st.session_state.from_amber_redirect = False
+        st.rerun()
+    
 # ─── gallery 模式 ─────────────────────────────────────
 
 if st.session_state.mode == "gallery":
@@ -773,6 +771,11 @@ if st.session_state.mode == "gallery":
                 st.session_state.mode = "write_amber"
                 st.session_state.extra_amber = False
                 st.rerun()
+        with col_s:
+            st.markdown(
+                "<p style='color:#b4a48a; font-size:12px; margin-top:8px; line-height:1.6;'>"
+                "每天2次免费额度<br>给人写信 +10积分<br>发帖消耗30积分</p>",
+                unsafe_allow_html=True)
 
     # 隐藏入口：刷够次数就在视线范围内出现
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
@@ -926,7 +929,7 @@ elif st.session_state.mode == "amber_detail":
     </div>
     """, unsafe_allow_html=True)
 
-    tab_chat, tab_letter = st.tabs(["和AI聊这块琥珀", "给ta写封信"])
+    tab_letter, tab_chat = st.tabs(["给ta写封信", "和AI聊这块琥珀"])
 
     with tab_chat:
         if not st.session_state.opening_initialized:
@@ -955,6 +958,93 @@ elif st.session_state.mode == "amber_detail":
         
         # 添加空白占位，防止输入框遮挡聊天内容
         st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+
+        # "我想写点什么"按钮和内嵌面板
+        col_write, _ = st.columns([2, 3])
+        with col_write:
+            if st.button("我想写点什么", key=f"write_panel_btn_{st.session_state.mode}"):
+                st.session_state.show_write_panel = not st.session_state.show_write_panel
+                st.session_state.write_panel_mode = None
+
+        if st.session_state.show_write_panel:
+            with st.container():
+                st.markdown(
+                    "<div style='padding:16px; margin:8px 0; border-radius:10px; "
+                    "background:rgba(180,150,100,0.08); border:1px solid rgba(180,150,100,0.15);'>",
+                    unsafe_allow_html=True)
+
+                col_p, col_a = st.columns(2)
+                with col_p:
+                    if st.button("写一个帖", key=f"panel_post_{st.session_state.mode}"):
+                        st.session_state.write_panel_mode = "post"
+                with col_a:
+                    if st.button("写一块琥珀", key=f"panel_amber_{st.session_state.mode}"):
+                        st.session_state.write_panel_mode = "amber"
+
+                if st.session_state.write_panel_mode == "post":
+                    user_points = get_user_points(st.session_state.username)
+                    if user_points < 30:
+                        st.markdown(
+                            "<p style='color:#94a3b8; font-size:13px;'>积分不足（需要30积分）。</p>",
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            f"<p style='color:#b4a48a; font-size:12px;'>写下此刻想说的话，随机落到陌生人信箱。消耗30积分（当前：{user_points}）</p>",
+                            unsafe_allow_html=True)
+                        with st.form(key=f"inline_post_form_{st.session_state.mode}", clear_on_submit=True):
+                            post_text = st.text_area("", placeholder="此刻最想让某个陌生人听到的话……（最多100字）",
+                                height=100, max_chars=100, label_visibility="collapsed")
+                            if st.form_submit_button("放它漂走") and post_text.strip():
+                                ok, msg = send_post(st.session_state.username, post_text.strip())
+                                if ok:
+                                    st.toast("帖已寄出 🕊️")
+                                    st.session_state.show_write_panel = False
+                                    st.session_state.write_panel_mode = None
+                                    st.rerun()
+                                else:
+                                    st.warning(msg)
+
+                elif st.session_state.write_panel_mode == "amber":
+                    user_id_panel = st.session_state.username
+                    today_count = check_daily_upload(user_id_panel)
+                    quota = get_daily_quota(user_id_panel)
+                    if today_count >= quota:
+                        user_points = get_user_points(user_id_panel)
+                        if user_points < 20:
+                            st.markdown(
+                                "<p style='color:#94a3b8; font-size:13px;'>今日额度已用完，积分也不足了。</p>",
+                                unsafe_allow_html=True)
+                        else:
+                            st.markdown(
+                                f"<p style='color:#b4a48a; font-size:12px;'>今日额度已用完，再发一块消耗20积分（当前：{user_points}）</p>",
+                                unsafe_allow_html=True)
+                            with st.form(key=f"inline_amber_form_{st.session_state.mode}", clear_on_submit=True):
+                                amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
+                                    height=100, max_chars=100, label_visibility="collapsed")
+                                if st.form_submit_button("留下这块琥珀（-20积分）") and amber_text.strip():
+                                    ok = submit_amber(user_id_panel, amber_text.strip(), user_id_panel, False, is_extra=True)
+                                    if ok:
+                                        st.toast("琥珀已留下 🪨")
+                                        st.session_state.show_write_panel = False
+                                        st.session_state.write_panel_mode = None
+                                        st.rerun()
+                                    else:
+                                        st.warning("发送失败，请检查积分。")
+                    else:
+                        with st.form(key=f"inline_amber_form_{st.session_state.mode}", clear_on_submit=True):
+                            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
+                                height=100, max_chars=100, label_visibility="collapsed")
+                            if st.form_submit_button("留下这块琥珀") and amber_text.strip():
+                                ok = submit_amber(user_id_panel, amber_text.strip(), user_id_panel, False, is_extra=False)
+                                if ok:
+                                    st.toast("琥珀已留下 🪨")
+                                    st.session_state.show_write_panel = False
+                                    st.session_state.write_panel_mode = None
+                                    st.rerun()
+                                else:
+                                    st.warning("发送失败。")
+
+                st.markdown("</div>", unsafe_allow_html=True)
 
         if prompt := st.chat_input("说说这块琥珀让你想到了什么…"):
             if st.session_state.get("initial_assistant_message"):
@@ -1158,6 +1248,93 @@ elif st.session_state.mode == "chat":
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+
+    # "我想写点什么"按钮和内嵌面板
+    col_write, _ = st.columns([2, 3])
+    with col_write:
+        if st.button("我想写点什么", key=f"write_panel_btn_{st.session_state.mode}"):
+            st.session_state.show_write_panel = not st.session_state.show_write_panel
+            st.session_state.write_panel_mode = None
+
+    if st.session_state.show_write_panel:
+        with st.container():
+            st.markdown(
+                "<div style='padding:16px; margin:8px 0; border-radius:10px; "
+                "background:rgba(180,150,100,0.08); border:1px solid rgba(180,150,100,0.15);'>",
+                unsafe_allow_html=True)
+
+            col_p, col_a = st.columns(2)
+            with col_p:
+                if st.button("写一个帖", key=f"panel_post_{st.session_state.mode}"):
+                    st.session_state.write_panel_mode = "post"
+            with col_a:
+                if st.button("写一块琥珀", key=f"panel_amber_{st.session_state.mode}"):
+                    st.session_state.write_panel_mode = "amber"
+
+            if st.session_state.write_panel_mode == "post":
+                user_points = get_user_points(st.session_state.username)
+                if user_points < 30:
+                    st.markdown(
+                        "<p style='color:#94a3b8; font-size:13px;'>积分不足（需要30积分）。</p>",
+                        unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f"<p style='color:#b4a48a; font-size:12px;'>写下此刻想说的话，随机落到陌生人信箱。消耗30积分（当前：{user_points}）</p>",
+                        unsafe_allow_html=True)
+                    with st.form(key=f"inline_post_form_{st.session_state.mode}", clear_on_submit=True):
+                        post_text = st.text_area("", placeholder="此刻最想让某个陌生人听到的话……（最多100字）",
+                            height=100, max_chars=100, label_visibility="collapsed")
+                        if st.form_submit_button("放它漂走") and post_text.strip():
+                            ok, msg = send_post(st.session_state.username, post_text.strip())
+                            if ok:
+                                st.toast("帖已寄出 🕊️")
+                                st.session_state.show_write_panel = False
+                                st.session_state.write_panel_mode = None
+                                st.rerun()
+                            else:
+                                st.warning(msg)
+
+            elif st.session_state.write_panel_mode == "amber":
+                user_id_panel = st.session_state.username
+                today_count = check_daily_upload(user_id_panel)
+                quota = get_daily_quota(user_id_panel)
+                if today_count >= quota:
+                    user_points = get_user_points(user_id_panel)
+                    if user_points < 20:
+                        st.markdown(
+                            "<p style='color:#94a3b8; font-size:13px;'>今日额度已用完，积分也不足了。</p>",
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            f"<p style='color:#b4a48a; font-size:12px;'>今日额度已用完，再发一块消耗20积分（当前：{user_points}）</p>",
+                            unsafe_allow_html=True)
+                        with st.form(key=f"inline_amber_form_{st.session_state.mode}", clear_on_submit=True):
+                            amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
+                                height=100, max_chars=100, label_visibility="collapsed")
+                            if st.form_submit_button("留下这块琥珀（-20积分）") and amber_text.strip():
+                                ok = submit_amber(user_id_panel, amber_text.strip(), user_id_panel, False, is_extra=True)
+                                if ok:
+                                    st.toast("琥珀已留下 🪨")
+                                    st.session_state.show_write_panel = False
+                                    st.session_state.write_panel_mode = None
+                                    st.rerun()
+                                else:
+                                    st.warning("发送失败，请检查积分。")
+                else:
+                    with st.form(key=f"inline_amber_form_{st.session_state.mode}", clear_on_submit=True):
+                        amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
+                            height=100, max_chars=100, label_visibility="collapsed")
+                        if st.form_submit_button("留下这块琥珀") and amber_text.strip():
+                            ok = submit_amber(user_id_panel, amber_text.strip(), user_id_panel, False, is_extra=False)
+                            if ok:
+                                st.toast("琥珀已留下 🪨")
+                                st.session_state.show_write_panel = False
+                                st.session_state.write_panel_mode = None
+                                st.rerun()
+                            else:
+                                st.warning("发送失败。")
+
+            st.markdown("</div>", unsafe_allow_html=True)
 
     if prompt := st.chat_input("说点什么..."):
         if st.session_state.get("initial_assistant_message"):
