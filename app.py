@@ -1,6 +1,7 @@
 import random
 import os
 import time
+import threading
 from supabase import create_client, Client
 from datetime import date
 from openai import OpenAI
@@ -188,6 +189,7 @@ st.markdown("""
 
 DB_PATH = "soul_echo.db"
 
+@st.cache_resource
 def get_db():
     url = st.secrets["supabase"]["url"]
     key = st.secrets["supabase"]["service_key"]
@@ -245,6 +247,7 @@ key只能是：themes（反复出现的话题）、emotions（情绪模式）、
     except Exception:
         pass  # 记忆更新失败不影响主流程
 
+@st.cache_resource
 def init_db():
     client = get_db()
     
@@ -313,6 +316,7 @@ def record_dwell(user_id, amber_id, seconds):
             "dwell_seconds": seconds
         }).execute()
 
+@st.cache_data(ttl=60)
 def check_daily_upload(user_id):
     if user_id == "rim":
         return 0
@@ -327,7 +331,7 @@ def get_daily_quota(user_id):
 
 def _open_amber(amber_id, content, author_id, ambers, user_id):
     dwell = time.time() - st.session_state.get("wall_start_time", time.time())
-    record_dwell(user_id, amber_id, min(dwell, 120))
+    threading.Thread(target=record_dwell, args=(user_id, amber_id, min(dwell, 120)), daemon=True).start()
     st.session_state.mode = "amber_detail"
     st.session_state.current_amber_id = amber_id
     st.session_state.current_amber_content = content
@@ -342,11 +346,12 @@ def submit_amber(user_id, content, author_name, is_anonymous, is_extra=False):
     today = date.today().isoformat()
     try:
         if is_extra:
-            current_points = get_user_points(user_id)
-            if current_points < 20:
-                return False
-            client.table("users").update({"points": current_points - 20}).eq("username", user_id).execute()
-            client.table("point_ledger").insert({"user_id": user_id, "delta": -20, "reason": "extra_amber"}).execute()
+                current_points = get_user_points(user_id)
+                if current_points < 20:
+                    return False
+                client.table("users").update({"points": current_points - 20}).eq("username", user_id).execute()
+                client.table("point_ledger").insert({"user_id": user_id, "delta": -20, "reason": "extra_amber"}).execute()
+                get_user_info.clear()
         amber_result = client.table("ambers").insert({
             "content": content,
             "author_id": user_id,
@@ -360,6 +365,7 @@ def submit_amber(user_id, content, author_name, is_anonymous, is_extra=False):
             "amber_id": amber_id
         }).execute()
         st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
+        check_daily_upload.clear()
         return True
     except Exception:
         return False
@@ -389,23 +395,28 @@ def try_earn_comment_points(user_id, amber_id):
     client.table("comment_rewards").insert({"user_id": user_id, "amber_id": amber_id}).execute()
     client.table("point_ledger").insert({"user_id": user_id, "delta": 10, "reason": "write_comment", "ref_id": amber_id}).execute()
     client.table("users").update({"points": get_user_points(user_id) + 10}).eq("username", user_id).execute()
+    get_user_info.clear()
     return True
+
+@st.cache_data(ttl=60)
+def get_user_info(user_id):
+    """获取用户信息，包括积分和订阅状态"""
+    client = get_db()
+    result = client.table("users").select("points, is_subscribed").eq("username", user_id).execute()
+    if result.data:
+        return {
+            "points": result.data[0]["points"],
+            "is_subscribed": result.data[0].get("is_subscribed", False)
+        }
+    return {"points": 0, "is_subscribed": False}
 
 def get_user_points(user_id):
     """获取用户当前积分"""
-    client = get_db()
-    result = client.table("users").select("points").eq("username", user_id).execute()
-    if result.data:
-        return result.data[0]["points"]
-    return 0
+    return get_user_info(user_id)["points"]
 
 def is_subscribed(user_id):
     """判断用户是否订阅"""
-    client = get_db()
-    result = client.table("users").select("is_subscribed").eq("username", user_id).execute()
-    if result.data:
-        return result.data[0].get("is_subscribed", False)
-    return False
+    return get_user_info(user_id)["is_subscribed"]
 
 def light_up_comment(message_id, sender_id, amber_id):
     """琥珀主人点亮留言，给留言者额外赚10积分，每条留言只能点亮一次"""
@@ -419,6 +430,7 @@ def light_up_comment(message_id, sender_id, amber_id):
     # 给留言者加积分
     client.table("point_ledger").insert({"user_id": sender_id, "delta": 10, "reason": "comment_lit", "ref_id": message_id}).execute()
     client.table("users").update({"points": get_user_points(sender_id) + 10}).eq("username", sender_id).execute()
+    get_user_info.clear()
     return True
 
 def can_reply_free(user_id, amber_id, other_user_id):
@@ -440,6 +452,7 @@ def deduct_stamp(user_id):
         return False
     client.table("users").update({"points": current - 10}).eq("username", user_id).execute()
     client.table("point_ledger").insert({"user_id": user_id, "delta": -10, "reason": "stamp"}).execute()
+    get_user_info.clear()
     return True
 
 def get_active_users(exclude_user_id):
@@ -462,6 +475,7 @@ def send_post(sender_id, content):
     client.table("users").update({"points": current - 30}).eq("username", sender_id).execute()
     client.table("point_ledger").insert({"user_id": sender_id, "delta": -30, "reason": "post"}).execute()
     client.table("posts").insert({"sender_id": sender_id, "receiver_id": receiver_id, "content": content}).execute()
+    get_user_info.clear()
     return True, "已寄出"
 
 def check_post_refunds(user_id):
@@ -472,10 +486,11 @@ def check_post_refunds(user_id):
     if not expired.data:
         return
     for post in expired.data:
-        current = get_user_points(user_id)
-        client.table("users").update({"points": current + 15}).eq("username", user_id).execute()
-        client.table("point_ledger").insert({"user_id": user_id, "delta": 15, "reason": "post_refund", "ref_id": str(post["id"])}).execute()
-        client.table("posts").delete().eq("id", post["id"]).execute()
+            current = get_user_points(user_id)
+            client.table("users").update({"points": current + 15}).eq("username", user_id).execute()
+            client.table("point_ledger").insert({"user_id": user_id, "delta": 15, "reason": "post_refund", "ref_id": str(post["id"])}).execute()
+            client.table("posts").delete().eq("id", post["id"]).execute()
+            get_user_info.clear()
 
 def get_inbox(user_id):
     client = get_db()
@@ -502,6 +517,7 @@ def mark_read(message_id):
     client = get_db()
     client.table("messages").update({"is_read": 1}).eq("id", message_id).execute()
 
+@st.cache_data(ttl=30)
 def get_unread_count(user_id):
     client = get_db()
     result = client.table("messages").select("id", count="exact").eq("receiver_id", user_id).eq("is_read", 0).execute()
@@ -523,6 +539,7 @@ def load_prompt(path: str) -> str:
 
 # ─── 每日轻问题 ───────────────────────────────────────
 
+@st.cache_data(ttl=3600)
 def get_daily_question():
     today = date.today().isoformat()
     client = get_db()
@@ -532,7 +549,7 @@ def get_daily_question():
     try:
         client = OpenAI(
             api_key=st.secrets["siliconflow"]["api_key"],
-            base_url=" `https://api.siliconflow.cn/v1` ",
+            base_url="https://api.siliconflow.cn/v1",
             timeout=30.0,
         )
         result = client.chat.completions.create(
@@ -544,13 +561,7 @@ def get_daily_question():
             max_tokens=50
         )
         question = result.choices[0].message.content.strip()
-        conn2 = get_db()
-        conn2.execute(
-            "INSERT OR IGNORE INTO daily_questions (question_date, question) VALUES (?,?)",
-            (today, question)
-        )
-        conn2.commit()
-        conn2.close()
+        get_db().table("daily_questions").insert({"question_date": today, "question": question}).execute()
         return question
     except Exception:
         return "今天有什么话，还没说出口？"
@@ -668,9 +679,9 @@ if "prompts_warmed" not in st.session_state:
 
 with st.sidebar:
     user_id = st.session_state.username
-    _user_info = get_db().table("users").select("points, is_subscribed").eq("username", user_id).execute()
-    _points = _user_info.data[0]["points"] if _user_info.data else 0
-    _subbed = _user_info.data[0].get("is_subscribed", False) if _user_info.data else False
+    _info = get_user_info(user_id)
+    _points = _info["points"]
+    _subbed = _info["is_subscribed"]
     st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{_points}</p>", unsafe_allow_html=True)
     if _subbed:
         st.markdown(
@@ -684,11 +695,7 @@ with st.sidebar:
             st.session_state.opening_initialized = False
             st.session_state.from_amber_redirect = False
             st.rerun()
-    # 使用缓存的未读消息数量，避免重复查询
-    if "unread_count" not in st.session_state or st.session_state.get("last_unread_check") != user_id:
-        st.session_state.unread_count = get_unread_count(user_id)
-        st.session_state.last_unread_check = user_id
-    unread = st.session_state.unread_count
+    unread = get_unread_count(user_id)
     
     inbox_label = f"收件箱  {unread} 条未读" if unread > 0 else "收件箱"
     if st.button(inbox_label, key="open_inbox"):
@@ -716,11 +723,7 @@ with st.sidebar:
 if st.session_state.mode == "gallery":
     user_id = st.session_state.username
 
-    # 缓存未读消息数量，避免重复查询
-    if "unread_count" not in st.session_state or st.session_state.get("last_unread_check") != user_id:
-        st.session_state.unread_count = get_unread_count(user_id)
-        st.session_state.last_unread_check = user_id
-    unread = st.session_state.unread_count
+    unread = get_unread_count(user_id)
     
     # 标题和收件箱按钮布局
     col_title, col_inbox = st.columns([3, 1])
