@@ -2,8 +2,11 @@ import random
 import os
 import time
 import threading
+import hashlib
+import json
+import re
 from supabase import create_client, Client
-from datetime import date
+from datetime import date, datetime, timedelta
 from openai import OpenAI
 import streamlit as st
 
@@ -239,7 +242,6 @@ key只能是：themes（反复出现的话题）、emotions（情绪模式）、
             ],
             max_tokens=200
         )
-        import json
         raw = result.choices[0].message.content.strip()
         data = json.loads(raw)
         for item in data.get("memories", []):
@@ -456,14 +458,12 @@ def deduct_stamp(user_id):
     return True
 
 def get_active_users(exclude_user_id):
-    from datetime import datetime, timedelta
     client = get_db()
     three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
     result = client.table("users").select("username").neq("username", exclude_user_id).gte("last_active", three_days_ago).execute()
     return [row["username"] for row in result.data]
 
 def send_post(sender_id, content):
-    import random
     client = get_db()
     current = get_user_points(sender_id)
     if current < 30:
@@ -479,7 +479,6 @@ def send_post(sender_id, content):
     return True, "已寄出"
 
 def check_post_refunds(user_id):
-    from datetime import datetime
     client = get_db()
     now = datetime.now().isoformat()
     expired = client.table("posts").select("id").eq("sender_id", user_id).eq("is_replied", False).lt("expires_at", now).execute()
@@ -516,6 +515,7 @@ def get_inbox(user_id):
 def mark_read(message_id):
     client = get_db()
     client.table("messages").update({"is_read": 1}).eq("id", message_id).execute()
+    get_unread_count.clear()
 
 @st.cache_data(ttl=30)
 def get_unread_count(user_id):
@@ -631,11 +631,11 @@ if st.session_state.username is None:
                 # 清理用户名：去除前后空格并转为小写
                 cleaned_username = login_username.strip().lower()
                 client = get_db()
-                result = client.table("users").select("*").eq("username", cleaned_username).eq("password", login_password).execute()
+                hashed_pw = hashlib.sha256(login_password.encode()).hexdigest()
+                result = client.table("users").select("*").eq("username", cleaned_username).eq("password", hashed_pw).execute()
                 user = result.data[0] if result.data else None
                 if user:
                     st.session_state.username = user["username"]
-                    from datetime import datetime
                     get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", user["username"]).execute()
                     st.rerun()
                 else:
@@ -652,9 +652,10 @@ if st.session_state.username is None:
                 cleaned_username = reg_username.strip().lower()
                 client = get_db()
                 try:
+                    hashed_pw = hashlib.sha256(reg_password.encode()).hexdigest()
                     client.table("users").insert({
                         "username": cleaned_username,
-                        "password": reg_password
+                        "password": hashed_pw
                     }).execute()
                     st.session_state.username = cleaned_username
                     st.success("注册成功！")
@@ -804,7 +805,6 @@ if st.session_state.mode == "gallery":
         st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
     
     # 从缓存的琥珀中随机挑选4个
-    import random
     if st.session_state.all_ambers:
         ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
     else:
@@ -839,7 +839,6 @@ if st.session_state.mode == "gallery":
                 display_name = row["author_name"] or "匿名"
             
             # 悬念截断：找第一个标点停顿截断，最多25字
-            import re
             match = re.search(r'[，。！？、；]', content[12:28])
             if match:
                 cut = 12 + match.start() + 1
@@ -880,7 +879,6 @@ if st.session_state.mode == "gallery":
         st.session_state.wall_refresh_count = wall_refresh + 1
         st.session_state.wall_start_time = time.time()
         # 重新随机挑选琥珀，无需重新查询数据库
-        import random
         if st.session_state.all_ambers:
             st.session_state.wall_ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
         st.rerun()
@@ -904,13 +902,13 @@ elif st.session_state.mode == "amber_detail":
     with col_back:
         if st.button("← 返回"):
             dwell = time.time() - st.session_state.get("amber_open_time", time.time())
-            record_dwell(user_id, amber_id, min(dwell, 300))
+            threading.Thread(target=record_dwell, args=(user_id, amber_id, min(dwell, 300)), daemon=True).start()
             st.session_state.mode = "gallery"
             st.rerun()
     with col_next:
         if len(wall_ambers) > 1 and st.button("下一块 →"):
             dwell = time.time() - st.session_state.get("amber_open_time", time.time())
-            record_dwell(user_id, amber_id, min(dwell, 300))
+            threading.Thread(target=record_dwell, args=(user_id, amber_id, min(dwell, 300)), daemon=True).start()
             next_idx = (idx + 1) % len(wall_ambers)
             next_a = wall_ambers[next_idx]
             st.session_state.current_amber_id = next_a["id"]
@@ -1058,9 +1056,9 @@ elif st.session_state.mode == "amber_detail":
                 st.session_state.initial_assistant_message = None
             st.session_state.messages.append({"role": "user", "content": prompt})
             # 交互次数更新weight
-            if st.session_state.mode == "amber_detail" and st.session_state.get("current_amber_id"):
-                client = get_db()
-                client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
+            # if st.session_state.mode == "amber_detail" and st.session_state.get("current_amber_id"):
+            #     client = get_db()
+            #     client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
             st.session_state.last_user_prompt = prompt
             st.rerun()
 
@@ -1348,9 +1346,9 @@ elif st.session_state.mode == "chat":
             st.session_state.initial_assistant_message = None
         st.session_state.messages.append({"role": "user", "content": prompt})
         # 每次用户发消息，给当前琥珀的weight +0.1
-        if st.session_state.mode == "amber_detail":
-            client = get_db()
-            client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
+        # if st.session_state.mode == "amber_detail":
+        #     client = get_db()
+        #     client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
         st.session_state.last_user_prompt = prompt
         st.rerun()
 
@@ -1588,9 +1586,6 @@ if st.session_state.last_user_prompt:
             # 每隔5轮对话，异步更新一次用户记忆
             turn_count = sum(1 for m in st.session_state.messages if m["role"] == "user")
             if turn_count > 0 and turn_count % 5 == 0:
-                _update_memories_from_conversation(
-                    st.session_state.username,
-                    st.session_state.messages
-                )
+                threading.Thread(target=_update_memories_from_conversation, args=(st.session_state.username, st.session_state.messages.copy()), daemon=True).start()
 
     st.session_state.last_user_prompt = None
