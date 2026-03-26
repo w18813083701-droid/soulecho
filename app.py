@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="Soul Echo",
     page_icon="🪨",
     layout="centered",
-    initial_sidebar_state="auto",
+    initial_sidebar_state="collapsed",
     menu_items=None  # 隐藏菜单
 )
 
@@ -186,6 +186,50 @@ st.markdown("""
             display: none !important;
         }
     }
+
+    /* 隐藏侧边栏和汉堡按钮 */
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"] {
+        display: none !important;
+    }
+
+    /* 底部留出导航栏空间 */
+    .block-container {
+        padding-bottom: 80px !important;
+    }
+
+    /* 底部导航栏 */
+    .bottom-nav {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        height: 62px;
+        background: rgba(244,239,230,0.97);
+        border-top: 1px solid rgba(0,0,0,0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        z-index: 9999;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+    .nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        height: 100%;
+        gap: 3px;
+    }
+    .nav-icon { font-size: 20px; line-height: 1; }
+    .nav-label {
+        font-size: 10px;
+        color: #94a3b8;
+        letter-spacing: 0.5px;
+    }
+    .nav-item.active .nav-label { color: #1a1a1a; font-weight: 500; }
+    .nav-item { cursor: pointer; }
+    .nav-item:active { opacity: 0.6; }
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
@@ -667,6 +711,61 @@ if st.session_state.username is None:
     
     st.stop()
 
+# ─── 底部导航栏 ────────────────────────────────────────
+_mode = st.session_state.get("mode", "gallery")
+if _mode not in ("login", "chat"):
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"]:has(
+        button[key="nav_gallery"]
+    ) {
+        position: fixed !important;
+        bottom: 0 !important; left: 0 !important; right: 0 !important;
+        z-index: 9999 !important;
+        background: rgba(244,239,230,0.97) !important;
+        border-top: 1px solid rgba(0,0,0,0.08) !important;
+        padding: 0 !important; margin: 0 !important;
+        max-width: 100% !important;
+        backdrop-filter: blur(8px) !important;
+    }
+    button[key="nav_gallery"],
+    button[key="nav_write"],
+    button[key="nav_mine"] {
+        border: none !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        height: 62px !important;
+        font-size: 11px !important;
+        color: #94a3b8 !important;
+        letter-spacing: 0.5px !important;
+        padding: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _labels = {
+        "gallery": "🪨\n广场",
+        "write_amber": "✍️\n写琥珀",
+        "my_ambers": "👤\n我的",
+    }
+    _c1, _c2, _c3 = st.columns(3)
+    with _c1:
+        _label = ("🪨\n· 广场 ·" if _mode == "gallery" else "🪨\n广场")
+        if st.button(_label, key="nav_gallery", use_container_width=True):
+            st.session_state.mode = "gallery"
+            st.rerun()
+    with _c2:
+        _label = ("✍️\n· 写琥珀 ·" if _mode == "write_amber" else "✍️\n写琥珀")
+        if st.button(_label, key="nav_write", use_container_width=True):
+            st.session_state.mode = "write_amber"
+            st.rerun()
+    with _c3:
+        _label = ("👤\n· 我的 ·" if _mode == "my_ambers" else "👤\n我的")
+        if st.button(_label, key="nav_mine", use_container_width=True):
+            st.session_state.mode = "my_ambers"
+            st.rerun()
+# ──────────────────────────────────────────────────────
+
 # 预热提示词缓存，避免进入聊天时出现 Running 提示
 if "prompts_warmed" not in st.session_state:
     load_prompt("opening/amber.md")
@@ -676,49 +775,6 @@ if "prompts_warmed" not in st.session_state:
     load_prompt("core/soul_observer.md")
     st.session_state.prompts_warmed = True
 
-# ─── 侧边栏 ──────────────────────────────────────────
-
-with st.sidebar:
-    user_id = st.session_state.username
-    _info = get_user_info(user_id)
-    _points = _info["points"]
-    _subbed = _info["is_subscribed"]
-    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{_points}</p>", unsafe_allow_html=True)
-    if _subbed:
-        st.markdown(
-            "<p style='font-size:12px; color:#b4a48a; margin:0;'>订阅中 ✦</p>",
-            unsafe_allow_html=True)
-    if st.session_state.mode in ["chat", "amber_detail", "inbox"]:
-        if st.button("← 首页", key="back_home"):
-            st.session_state.mode = "gallery"
-            st.session_state.messages = []
-            st.session_state.entry_path = None
-            st.session_state.opening_initialized = False
-            st.session_state.from_amber_redirect = False
-            st.rerun()
-    unread = get_unread_count(user_id)
-    
-    inbox_label = f"收件箱  {unread} 条未读" if unread > 0 else "收件箱"
-    if st.button(inbox_label, key="open_inbox"):
-        st.session_state.mode = "inbox"
-        st.rerun()
-    
-    if st.button("我的琥珀", key="my_ambers"):
-        st.session_state.mode = "my_ambers"
-        st.rerun()
-
-    if st.button("发一个帖", key="write_post"):
-        st.session_state.mode = "write_post"
-        st.rerun()
-    
-    if st.button("和AI聊", key="open_chat"):
-        st.session_state.mode = "chat"
-        st.session_state.entry_path = "direct_vent"
-        st.session_state.messages = []
-        st.session_state.opening_initialized = False
-        st.session_state.from_amber_redirect = False
-        st.rerun()
-    
 # ─── gallery 模式 ─────────────────────────────────────
 
 if st.session_state.mode == "gallery":
@@ -1424,6 +1480,48 @@ elif st.session_state.mode == "my_ambers":
                    color:#1a1a1a; margin:0;">我的琥珀</h1>
     </div>
     """, unsafe_allow_html=True)
+    
+    st.markdown('<div style="background:rgba(210,180,140,0.12);border-radius:12px;padding:16px 20px;margin-bottom:24px;">', unsafe_allow_html=True)
+    user_id = st.session_state.username
+    _info = get_user_info(user_id)
+    _points = _info["points"]
+    _subbed = _info["is_subscribed"]
+    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{_points}</p>", unsafe_allow_html=True)
+    if _subbed:
+        st.markdown(
+            "<p style='font-size:12px; color:#b4a48a; margin:0;'>订阅中 ✦</p>",
+            unsafe_allow_html=True)
+    if st.session_state.mode in ["chat", "amber_detail", "inbox"]:
+        if st.button("← 首页", key="back_home"):
+            st.session_state.mode = "gallery"
+            st.session_state.messages = []
+            st.session_state.entry_path = None
+            st.session_state.opening_initialized = False
+            st.session_state.from_amber_redirect = False
+            st.rerun()
+    unread = get_unread_count(user_id)
+    
+    inbox_label = f"收件箱  {unread} 条未读" if unread > 0 else "收件箱"
+    if st.button(inbox_label, key="open_inbox"):
+        st.session_state.mode = "inbox"
+        st.rerun()
+    
+    if st.button("我的琥珀", key="my_ambers"):
+        st.session_state.mode = "my_ambers"
+        st.rerun()
+
+    if st.button("发一个帖", key="write_post"):
+        st.session_state.mode = "write_post"
+        st.rerun()
+    
+    if st.button("和AI聊", key="open_chat"):
+        st.session_state.mode = "chat"
+        st.session_state.entry_path = "direct_vent"
+        st.session_state.messages = []
+        st.session_state.opening_initialized = False
+        st.session_state.from_amber_redirect = False
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # 获取用户的所有琥珀，包括收到的信件数
     client = get_db()
