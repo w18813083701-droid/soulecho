@@ -284,45 +284,7 @@ key只能是：themes（反复出现的话题）、emotions（情绪模式）、
     except Exception:
         pass  # 记忆更新失败不影响主流程
 
-@st.cache_resource
-def init_db():
-    client = get_db()
-    
-    # 检查 ambers 表是否有数据
-    result = client.table("ambers").select("id", count="exact").execute()
-    existing = result.count
-    if existing == 0:
-        seeds = [
-            "我以前很想让别人注意到我变漂亮了，但是当自己穿着好看的衣服出门又感觉所有人都在注视着我、审判我。我为了自己心里能安静点，之后出门都戴起了口罩、穿上了最丑的衣服。",
-            "我们所有人谁不是小孩藏在大人衣服里呢？我时常感觉外界在朝衣服里灌风，我的身体在硬抗。最开始，我还有可以脱下大人衣服的场合和人，可是到了后来，我却一个都找不到了。",
-            "我总是熬夜，我不知道为什么。我一遍又一遍地刷着什么，好像在渴望遇到一个答案，可是我甚至都不知道自己在寻找的是什么。没有找到就不愿睡去，直到精疲力尽才无力地倒在枕头上，第二天又像木偶一样重复。",
-            "我的人生总需要喜欢着某个人才会觉得这个世界不至于太荒芜。尽管我潜意识知道喜欢的人不太可能真的喜欢我，但似乎这种爱而不得的状态才让我有活着的实感。",
-            "我听到同龄人过得不好，心里却感觉到一阵轻松。可是转头一想，我究竟怎么会变成这样？这个时代，怎么把我变成这样的人了？",
-            "明明看不惯那些溜须拍马的人，但看着他们风生水起，心里还是会一阵刺痛。我最终发现，我不是学不会逢场作戏，我只是宁愿抱着这块又冷又硬的石头沉下去，也不想允许自己沾上一丁点那种令人作呕的腥味。",
-            "我的口袋里留着公交卡和几张零钱，以防手机没电。我还喜欢散步，喜欢深度交流，喜欢逛菜市场，喜欢早睡早起。——只是现在的年轻人里，确实没几个我这样的了。",
-            "一场瓢泼大雨落下，我却在彻夜间长大。后来我成为一个不再会让自己轻易着凉的合格的大人，可我却失去了做回天真的孩子的自由。",
-            "我很想念我的妈妈，而她正在服侍快要离开这个世界的外婆。当死亡的阴影和生之羁绊同时挤进胸腔，我发现自己穷尽一生，也无法把存在的意义想得更明晰。",
-            "经常被无意义感侵扰，觉得一切都很暗淡，但我依然不厌其烦地把自己填进各项事务里。真正的困难只剩下存在主义虚无了，世俗的标准早就困不住我。在这个层面上，我是被选中的，也是受诅咒的。",
-            "总觉得我不属于当下的生活，像是一直活在他处。眼前的日常变成了一个硬壳，死死束缚着生长的方向。但我偶尔也会恐惧：如果真的敲碎它，所谓的真正的生活，真的存在吗？",
-            "孤独已经是老朋友了，我早就学会了在自己的精神隔间里安然无恙。但偶尔在街上看到他人相拥，还是会被突然击中。我这双手……到底有多久没有触碰过另一个人的体温了？",
-            "真正的轻松永远只能来自内在的自洽。那些所谓对自我审视的放弃，总会在某个毫无防备的夜里，像一根倒刺般突然扎进心里。毕竟，潜意识从不撒谎。",
-            "我总是习惯钻进潜意识的怀抱里自我抱持，以为那就是最安全的堡垒。可是当真的渴望一双现实的手伸过来时，第一反应却总是刺耳的警报。这种对亲密极度渴望又极度恐惧的拉扯，我往往分不清究竟是在保护自己，还是在囚禁自己。",
-            "当我回忆起她，怀念和怨恨是同时来的。感激她的岁月，也恨她把我当过时尚单品。有的东西，果然只能局限在纸上。",
-            "我一直都很自信，未来的我会更自信一点吗？",
-            "今天看一本书看哭了，忽然明白自己原来一直都有心理问题。但我不甘心。我不想就这么认命，被童年控制一生。",
-            "我其实情感特别充沛，但这又是一个与他人如此遥远的时代。我渴望与他人心贴心畅谈，但似乎每个人都有自己的世界，而我的敏感和泛滥总像个笑话。",
-            "我们还是不要做朋友了，我很悲伤我们始终还是不合适。不过我们还是度过了很美好的四年。你的婚礼我不必出现，而我的人生后半程也不需要你的参与了，祝你仍然有美满的人生。",
-            "当她对我说：'没事呢，我在这呢！有什么话和我说。'结果电话那头的我，哭得更凶了。",
-        ]
-        for content in seeds:
-            client.table("ambers").insert({
-                "content": content,
-                "author_id": "rim",
-                "author_name": "rim",
-                "is_anonymous": 0
-            }).execute()
 
-init_db()
 
 # ─── 工具函数 ─────────────────────────────────────────
 
@@ -334,6 +296,32 @@ def save_line(user_id, original_text, edited_text, source_amber_id=None):
         "edited_text": edited_text,
         "source_amber_id": source_amber_id
     }).execute()
+
+def get_saved_lines(user_id):
+    client = get_db()
+    result = client.table("saved_lines").select(
+        "id, original_text, edited_text, source_amber_id, created_at"
+    ).eq("user_id", user_id).order("created_at", desc=True).execute()
+    
+    rows = result.data
+    if not rows:
+        return []
+    
+    # 获取有来源琥珀的条目的琥珀原文
+    amber_ids = [r["source_amber_id"] for r in rows if r["source_amber_id"]]
+    amber_dict = {}
+    if amber_ids:
+        ambers = client.table("ambers").select("id, content").in_("id", amber_ids).execute()
+        amber_dict = {a["id"]: a["content"] for a in ambers.data}
+    
+    for row in rows:
+        row["amber_content"] = amber_dict.get(row["source_amber_id"]) if row["source_amber_id"] else None
+    
+    return rows
+
+def delete_saved_line(line_id):
+    client = get_db()
+    client.table("saved_lines").delete().eq("id", line_id).execute()
 
 def get_ambers_for_wall(user_id, limit=12):
     client = get_db()
@@ -836,19 +824,7 @@ if st.session_state.mode == "gallery":
                 "每天2次免费额度<br>给人写信 +10积分<br>发帖消耗30积分</p>",
                 unsafe_allow_html=True)
 
-    # 隐藏入口：刷够次数就在视线范围内出现
-    wall_refresh = st.session_state.get("wall_refresh_count", 0)
-    if wall_refresh >= 10:
-        st.markdown(
-            "<p style='text-align:center; color:#94a3b8; font-size:13px; margin-top:24px;'>"
-            "也许此刻，你自己有更想说的话。</p>", unsafe_allow_html=True)
-        if st.button("直接说出来", key="hidden_vent"):
-            st.session_state.mode = "chat"
-            st.session_state.entry_path = "direct_vent"
-            st.session_state.messages = []
-            st.session_state.opening_initialized = False
-            st.session_state.from_amber_redirect = True
-            st.rerun()
+
 
     st.markdown(
         "<hr style='border:0; border-top:1px solid rgba(0,0,0,0.06); margin:16px 0 28px 0;'>",
@@ -1626,15 +1602,58 @@ elif st.session_state.mode == "my_ambers":
     if st.button("发一个帖", key="write_post"):
         st.session_state.mode = "write_post"
         st.rerun()
-    
-    if st.button("和AI聊", key="open_chat"):
-        st.session_state.mode = "chat"
-        st.session_state.entry_path = "direct_vent"
-        st.session_state.messages = []
-        st.session_state.opening_initialized = False
-        st.session_state.from_amber_redirect = False
-        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 私人库入口
+    if "show_saved_lines" not in st.session_state:
+        st.session_state.show_saved_lines = False
+
+    saved_label = "私人库 ✦" if not st.session_state.show_saved_lines else "私人库 ✦ ▲"
+    if st.button(saved_label, key="toggle_saved_lines"):
+        st.session_state.show_saved_lines = not st.session_state.show_saved_lines
+        st.rerun()
+
+    if st.session_state.show_saved_lines:
+        saved = get_saved_lines(user_id)
+        if not saved:
+            st.markdown(
+                "<p style='text-align:center; color:#94a3b8; font-size:13px; margin:16px 0;'>还没有存下任何句子。</p>",
+                unsafe_allow_html=True)
+        else:
+            for row in saved:
+                amber_content = row.get("amber_content")
+                edited_text = row.get("edited_text") or row.get("original_text")
+                line_id = row["id"]
+                
+                if amber_content:
+                    st.markdown(f"""
+                    <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
+                                background:rgba(210,180,140,0.1); border:1px solid rgba(180,150,100,0.15);
+                                box-shadow:2px 3px 12px rgba(0,0,0,0.04);">
+                        <p style="color:#94a3b8; font-size:12px; line-height:1.7; margin:0 0 10px 0;
+                                  border-left:2px solid rgba(180,150,100,0.3); padding-left:10px;">
+                            {amber_content}
+                        </p>
+                        <p style="color:#2d2d2d; font-size:15px; line-height:1.9; margin:0;">
+                            {edited_text}
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
+                                background:rgba(210,180,140,0.1); border:1px solid rgba(180,150,100,0.15);
+                                box-shadow:2px 3px 12px rgba(0,0,0,0.04);">
+                        <p style="color:#2d2d2d; font-size:15px; line-height:1.9; margin:0;">
+                            {edited_text}
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                if st.button("删除", key=f"delete_saved_{line_id}"):
+                    delete_saved_line(line_id)
+                    st.toast("已删除")
+                    st.rerun()
     
     # 获取用户的所有琥珀，包括收到的信件数
     client = get_db()
