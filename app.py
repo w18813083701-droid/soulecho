@@ -80,16 +80,7 @@ st.markdown("""
         padding-bottom: 16px;
     }
 
-    .stTabs [data-baseweb="tab"] {
-        font-size: 13px;
-        color: #64748b;
-        letter-spacing: 0.5px;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #1a1a1a !important;
-        border-bottom: 1px solid #1a1a1a !important;
-        background: transparent !important;
-    }
+
 
     [data-testid="stSidebar"] {
         background: #ede8df !important;
@@ -334,6 +325,15 @@ def init_db():
 init_db()
 
 # ─── 工具函数 ─────────────────────────────────────────
+
+def save_line(user_id, original_text, edited_text, source_amber_id=None):
+    client = get_db()
+    client.table("saved_lines").insert({
+        "user_id": user_id,
+        "original_text": original_text,
+        "edited_text": edited_text,
+        "source_amber_id": source_amber_id
+    }).execute()
 
 def get_ambers_for_wall(user_id, limit=12):
     client = get_db()
@@ -622,6 +622,8 @@ if "initial_assistant_message" not in st.session_state:
     st.session_state.initial_assistant_message = None
 if "opening_initialized" not in st.session_state:
     st.session_state.opening_initialized = False
+if "show_save_panel" not in st.session_state:
+    st.session_state.show_save_panel = False
 
 if "wall_refresh_count" not in st.session_state:
     st.session_state.wall_refresh_count = 0
@@ -643,6 +645,8 @@ if "show_write_panel" not in st.session_state:
     st.session_state.show_write_panel = False
 if "write_panel_mode" not in st.session_state:
     st.session_state.write_panel_mode = None
+if "chat_mode" not in st.session_state:
+    st.session_state.chat_mode = "letter"  # "letter" 或 "chat"
 
 # ─── 登录/注册逻辑 ────────────────────────────────────
 
@@ -782,20 +786,13 @@ if st.session_state.mode == "gallery":
 
     unread = get_unread_count(user_id)
     
-    # 标题和收件箱按钮布局
-    col_title, col_inbox = st.columns([3, 1])
-    with col_title:
-        st.markdown("""
-        <div style="padding:48px 0 24px 0;">
-            <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
-                       color:#1a1a1a; margin:0;">Soul Echo</h1>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_inbox:
-        inbox_label = f"收件箱 📬 ({unread})" if unread > 0 else "收件箱 📬"
-        if st.button(inbox_label, key="main_inbox_button"):
-            st.session_state.mode = "inbox"
-            st.rerun()
+    # 标题布局
+    st.markdown("""
+    <div style="padding:48px 0 24px 0;">
+        <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
+                   color:#1a1a1a; margin:0;">Soul Echo</h1>
+    </div>
+    """, unsafe_allow_html=True)
 
     daily_q = get_daily_question()
     today_upload_count = check_daily_upload(user_id)
@@ -986,9 +983,58 @@ elif st.session_state.mode == "amber_detail":
     </div>
     """, unsafe_allow_html=True)
 
-    tab_letter, tab_chat = st.tabs(["给ta写封信", "和AI聊这块琥珀"])
+    # 手动切换模式
+    col_letter, col_chat = st.columns(2)
+    with col_letter:
+        if st.button("给ta写封信", use_container_width=True):
+            st.session_state.chat_mode = "letter"
+            st.rerun()
+    with col_chat:
+        if st.button("和AI聊这块琥珀", use_container_width=True):
+            st.session_state.chat_mode = "chat"
+            st.rerun()
 
-    with tab_chat:
+    st.markdown("<hr style='margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
+
+    if st.session_state.chat_mode == "letter":
+        # 原有的写信表单代码（完全不变）
+        with st.form(key="letter_form", clear_on_submit=True):
+            if author_id == user_id:
+                st.markdown("<p style='color:#94a3b8; font-size:13px;'>这是你的琥珀。也可以给自己写一封信。</p>", unsafe_allow_html=True)
+                letter = st.text_area("", placeholder="写给此刻的自己……", height=120, 
+                                   label_visibility="collapsed")
+                submit_button = st.form_submit_button("寄给自己")
+                if submit_button and letter.strip():
+                    send_message(amber_id, user_id, user_id, letter.strip())
+                    st.toast("信件已稳妥寄出", icon="🕊️")
+            else:
+                letter = st.text_area("", placeholder="只有对方能看见……",
+                    height=120, label_visibility="collapsed")
+                is_free_send = can_reply_free(user_id, amber_id, author_id)
+                user_points_now = get_user_points(user_id)
+                if not is_free_send:
+                    st.markdown(
+                        f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points_now}）</p>",
+                        unsafe_allow_html=True)
+                label_send = "寄出去（-10积分）" if not is_free_send else "寄出去"
+                submit_button = st.form_submit_button(label_send)
+                if submit_button:
+                    if letter.strip():
+                        if not is_free_send:
+                            ok = deduct_stamp(user_id)
+                            if not ok:
+                                st.warning("积分不足，无法续信。")
+                                st.stop()
+                        send_message(amber_id, user_id, author_id, letter.strip())
+                        earned = try_earn_comment_points(user_id, amber_id) if is_free_send else False
+                        if earned:
+                            st.toast("信件已稳妥寄出，获得10积分 🪙", icon="🕊️")
+                        else:
+                            st.toast("信件已稳妥寄出", icon="🕊️")
+                    else:
+                        st.warning("还没写什么内容。")
+    else:
+        # 原有的聊天内容（直接放代码，不需要 tab 包裹）
         if not st.session_state.opening_initialized:
             st.session_state.opening_initialized = True
             client_init = OpenAI(
@@ -996,25 +1042,60 @@ elif st.session_state.mode == "amber_detail":
                 base_url="https://api.siliconflow.cn/v1",
                 timeout=60.0,
             )
-            with st.chat_message("assistant"):
-                stream = client_init.chat.completions.create(
-                    model=FAST_OPENING_MODEL,  # 使用快速模型生成开场白
-                    messages=[
-                        {"role": "system", "content": load_prompt("opening/amber.md")},
-                        {"role": "user", "content": f"琥珀文本：{content}"}
-                    ],
-                    stream=True
-                )
-                opening_text = st.write_stream(stream)
-            st.session_state.initial_assistant_message = opening_text
+            stream = client_init.chat.completions.create(
+                model=FAST_OPENING_MODEL,
+                messages=[
+                    {"role": "system", "content": load_prompt("opening/amber.md")},
+                    {"role": "user", "content": f"琥珀文本：{content}"}
+                ],
+                stream=True
+            )
+            opening_chunks = []
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    opening_chunks.append(chunk.choices[0].delta.content)
+            opening_text = "".join(opening_chunks)
+            st.session_state.messages.append({"role": "assistant", "content": opening_text})
+            st.session_state.initial_assistant_message = None
 
+        # 消息循环渲染
         for msg in st.session_state.messages:
             if msg["role"] != "system":
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
-        
-        # 添加空白占位，防止输入框遮挡聊天内容
-        st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+
+        # 获取最后一条AI消息，只在最后一条是assistant时才显示按钮
+        last_ai = None
+        if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+            last_ai = st.session_state.messages[-1]["content"]
+            if st.button("存下这句话", key=f"save_line_btn_{len(st.session_state.messages)}"):
+                st.session_state.show_save_panel = True
+
+        # 保存面板
+        if st.session_state.get("show_save_panel") and last_ai:
+            st.markdown(
+                "<p style='color:#b4a48a; font-size:12px; margin:8px 0 4px 0;'>这句话还差一点像你。</p>",
+                unsafe_allow_html=True)
+            edited = st.text_area(
+                "", value=last_ai,
+                height=100, label_visibility="collapsed",
+                key="save_line_edit")
+            col_confirm, col_cancel = st.columns([1, 1])
+            with col_confirm:
+                if st.button("就是这句", key="save_line_confirm"):
+                    save_line(
+                        user_id=st.session_state.username,
+                        original_text=last_ai,
+                        edited_text=edited,
+                        source_amber_id=st.session_state.current_amber_id
+                    )
+                    st.session_state.show_save_panel = False
+                    st.toast("已存入私人库 ✦")
+                    st.rerun()
+            with col_cancel:
+                if st.button("取消", key="save_line_cancel"):
+                    st.session_state.show_save_panel = False
+                    st.rerun()
 
         # "我想写点什么"按钮和内嵌面板
         col_write, _ = st.columns([2, 3])
@@ -1103,57 +1184,11 @@ elif st.session_state.mode == "amber_detail":
 
                 st.markdown("</div>", unsafe_allow_html=True)
 
+        # 输入框直接放在最后
         if prompt := st.chat_input("说说这块琥珀让你想到了什么…"):
-            if st.session_state.get("initial_assistant_message"):
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": st.session_state.initial_assistant_message
-                })
-                st.session_state.initial_assistant_message = None
             st.session_state.messages.append({"role": "user", "content": prompt})
-            # 交互次数更新weight
-            # if st.session_state.mode == "amber_detail" and st.session_state.get("current_amber_id"):
-            #     client = get_db()
-            #     client.table("ambers").update({"weight": st.session_state.current_amber_weight + 0.1}).eq("id", st.session_state.current_amber_id).execute()
             st.session_state.last_user_prompt = prompt
             st.rerun()
-
-    with tab_letter:
-        with st.form(key="letter_form", clear_on_submit=True):
-            if author_id == user_id:
-                st.markdown("<p style='color:#94a3b8; font-size:13px;'>这是你的琥珀。也可以给自己写一封信。</p>", unsafe_allow_html=True)
-                letter = st.text_area("", placeholder="写给此刻的自己……", height=120, 
-                                   label_visibility="collapsed")
-                submit_button = st.form_submit_button("寄给自己")
-                if submit_button and letter.strip():
-                    send_message(amber_id, user_id, user_id, letter.strip())
-                    st.toast("信件已稳妥寄出", icon="🕊️")
-            else:
-                letter = st.text_area("", placeholder="只有对方能看见……",
-                    height=120, label_visibility="collapsed")
-                is_free_send = can_reply_free(user_id, amber_id, author_id)
-                user_points_now = get_user_points(user_id)
-                if not is_free_send:
-                    st.markdown(
-                        f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points_now}）</p>",
-                        unsafe_allow_html=True)
-                label_send = "寄出去（-10积分）" if not is_free_send else "寄出去"
-                submit_button = st.form_submit_button(label_send)
-                if submit_button:
-                    if letter.strip():
-                        if not is_free_send:
-                            ok = deduct_stamp(user_id)
-                            if not ok:
-                                st.warning("积分不足，无法续信。")
-                                st.stop()
-                        send_message(amber_id, user_id, author_id, letter.strip())
-                        earned = try_earn_comment_points(user_id, amber_id) if is_free_send else False
-                        if earned:
-                            st.toast("信件已稳妥寄出，获得10积分 🪙", icon="🕊️")
-                        else:
-                            st.toast("信件已稳妥寄出", icon="🕊️")
-                    else:
-                        st.warning("还没写什么内容。")
 
 # ─── inbox 模式 ───────────────────────────────────────
 
@@ -1275,6 +1310,17 @@ elif st.session_state.mode == "chat":
         "padding:32px 0 16px 0; letter-spacing:1px;'>—</p>",
         unsafe_allow_html=True)
 
+    # 添加返回按钮
+    col_back, _ = st.columns([1, 10])
+    with col_back:
+        if st.button("← 返回", key="back_from_chat"):
+            st.session_state.mode = "gallery"
+            st.session_state.messages = []
+            st.session_state.entry_path = None
+            st.session_state.opening_initialized = False
+            st.session_state.from_amber_redirect = False
+            st.rerun()
+
     if not st.session_state.opening_initialized:
         st.session_state.opening_initialized = True
         context_note = ""
@@ -1305,6 +1351,40 @@ elif st.session_state.mode == "chat":
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+    
+    if st.session_state.messages:
+        last_ai = next(
+            (m["content"] for m in reversed(st.session_state.messages)
+             if m["role"] == "assistant"), None
+        )
+        if last_ai:
+            if st.button("存下这句话", key=f"save_line_btn_vent_{len(st.session_state.messages)}"):
+                st.session_state.show_save_panel = True
+
+    if st.session_state.get("show_save_panel"):
+        st.markdown(
+            "<p style='color:#b4a48a; font-size:12px; margin:8px 0 4px 0;'>这句话还差一点像你。</p>",
+            unsafe_allow_html=True)
+        edited = st.text_area(
+            "", value=last_ai if last_ai else "",
+            height=100, label_visibility="collapsed",
+            key="save_line_edit_vent")
+        col_confirm, col_cancel = st.columns([1, 1])
+        with col_confirm:
+            if st.button("就是这句", key="save_line_confirm_vent"):
+                save_line(
+                    user_id=st.session_state.username,
+                    original_text=last_ai,
+                    edited_text=edited,
+                    source_amber_id=None
+                )
+                st.session_state.show_save_panel = False
+                st.toast("已存入私人库 ✦")
+                st.rerun()
+        with col_cancel:
+            if st.button("取消", key="save_line_cancel_vent"):
+                st.session_state.show_save_panel = False
+                st.rerun()
 
     # "我想写点什么"按钮和内嵌面板
     col_write, _ = st.columns([2, 3])
