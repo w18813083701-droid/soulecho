@@ -624,6 +624,8 @@ if "opening_initialized" not in st.session_state:
     st.session_state.opening_initialized = False
 if "show_save_panel" not in st.session_state:
     st.session_state.show_save_panel = False
+if "selected_line" not in st.session_state:
+    st.session_state.selected_line = None
 
 if "wall_refresh_count" not in st.session_state:
     st.session_state.wall_refresh_count = 0
@@ -1064,38 +1066,54 @@ elif st.session_state.mode == "amber_detail":
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
-        # 获取最后一条AI消息，只在最后一条是assistant时才显示按钮
-        last_ai = None
-        if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
-            last_ai = st.session_state.messages[-1]["content"]
-            if st.button("存下这句话", key=f"save_line_btn_{len(st.session_state.messages)}"):
-                st.session_state.show_save_panel = True
+        # 存下一句话的入口
+        ai_messages = [m["content"] for m in st.session_state.messages if m["role"] == "assistant"]
+        if len(ai_messages) >= 1:
+            if st.button("存下一句话", key="open_save_panel"):
+                st.session_state.show_save_panel = not st.session_state.get("show_save_panel", False)
+                st.session_state.selected_line = None
+                st.rerun()
 
-        # 保存面板
-        if st.session_state.get("show_save_panel") and last_ai:
+        if st.session_state.get("show_save_panel"):
+            recent_ai = ai_messages[-3:] if len(ai_messages) >= 3 else ai_messages
+            recent_ai = list(reversed(recent_ai))
+            
             st.markdown(
-                "<p style='color:#b4a48a; font-size:12px; margin:8px 0 4px 0;'>这句话还差一点像你。</p>",
+                "<p style='color:#b4a48a; font-size:12px; margin:12px 0 8px 0;'>选一句让你停住的话</p>",
                 unsafe_allow_html=True)
-            edited = st.text_area(
-                "", value=last_ai,
-                height=100, label_visibility="collapsed",
-                key="save_line_edit")
-            col_confirm, col_cancel = st.columns([1, 1])
-            with col_confirm:
-                if st.button("就是这句", key="save_line_confirm"):
-                    save_line(
-                        user_id=st.session_state.username,
-                        original_text=last_ai,
-                        edited_text=edited,
-                        source_amber_id=st.session_state.current_amber_id
-                    )
-                    st.session_state.show_save_panel = False
-                    st.toast("已存入私人库 ✦")
+            
+            for i, line in enumerate(recent_ai):
+                preview = line[:40] + "…" if len(line) > 40 else line
+                if st.button(preview, key=f"select_line_{i}"):
+                    st.session_state.selected_line = line
                     st.rerun()
-            with col_cancel:
-                if st.button("取消", key="save_line_cancel"):
-                    st.session_state.show_save_panel = False
-                    st.rerun()
+            
+            if st.session_state.get("selected_line"):
+                st.markdown(
+                    "<p style='color:#b4a48a; font-size:12px; margin:12px 0 4px 0;'>这句话还差一点像你。</p>",
+                    unsafe_allow_html=True)
+                edited = st.text_area(
+                    "", value=st.session_state.selected_line,
+                    height=100, label_visibility="collapsed",
+                    key="save_line_edit")
+                col_confirm, col_cancel = st.columns([1, 1])
+                with col_confirm:
+                    if st.button("就是这句", key="save_line_confirm"):
+                        save_line(
+                            user_id=st.session_state.username,
+                            original_text=st.session_state.selected_line,
+                            edited_text=edited,
+                            source_amber_id=st.session_state.current_amber_id
+                        )
+                        st.session_state.show_save_panel = False
+                        st.session_state.selected_line = None
+                        st.toast("已存入私人库 ✦")
+                        st.rerun()
+                with col_cancel:
+                    if st.button("取消", key="save_line_cancel"):
+                        st.session_state.show_save_panel = False
+                        st.session_state.selected_line = None
+                        st.rerun()
 
         # "我想写点什么"按钮和内嵌面板
         col_write, _ = st.columns([2, 3])
@@ -1349,42 +1367,57 @@ elif st.session_state.mode == "chat":
 
     for msg in st.session_state.messages:
         if msg["role"] != "system":
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
     
-    if st.session_state.messages:
-        last_ai = next(
-            (m["content"] for m in reversed(st.session_state.messages)
-             if m["role"] == "assistant"), None
-        )
-        if last_ai:
-            if st.button("存下这句话", key=f"save_line_btn_vent_{len(st.session_state.messages)}"):
-                st.session_state.show_save_panel = True
+    # 存下一句话的入口
+    ai_messages = [m["content"] for m in st.session_state.messages if m["role"] == "assistant"]
+    if len(ai_messages) >= 1:
+        if st.button("存下一句话", key="open_save_panel_vent"):
+            st.session_state.show_save_panel = not st.session_state.get("show_save_panel", False)
+            st.session_state.selected_line = None
+            st.rerun()
 
     if st.session_state.get("show_save_panel"):
+        recent_ai = ai_messages[-3:] if len(ai_messages) >= 3 else ai_messages
+        recent_ai = list(reversed(recent_ai))
+        
         st.markdown(
-            "<p style='color:#b4a48a; font-size:12px; margin:8px 0 4px 0;'>这句话还差一点像你。</p>",
+            "<p style='color:#b4a48a; font-size:12px; margin:12px 0 8px 0;'>选一句让你停住的话</p>",
             unsafe_allow_html=True)
-        edited = st.text_area(
-            "", value=last_ai if last_ai else "",
-            height=100, label_visibility="collapsed",
-            key="save_line_edit_vent")
-        col_confirm, col_cancel = st.columns([1, 1])
-        with col_confirm:
-            if st.button("就是这句", key="save_line_confirm_vent"):
-                save_line(
-                    user_id=st.session_state.username,
-                    original_text=last_ai,
-                    edited_text=edited,
-                    source_amber_id=None
-                )
-                st.session_state.show_save_panel = False
-                st.toast("已存入私人库 ✦")
+        
+        for i, line in enumerate(recent_ai):
+            preview = line[:40] + "…" if len(line) > 40 else line
+            if st.button(preview, key=f"select_line_vent_{i}"):
+                st.session_state.selected_line = line
                 st.rerun()
-        with col_cancel:
-            if st.button("取消", key="save_line_cancel_vent"):
-                st.session_state.show_save_panel = False
-                st.rerun()
+        
+        if st.session_state.get("selected_line"):
+            st.markdown(
+                "<p style='color:#b4a48a; font-size:12px; margin:12px 0 4px 0;'>这句话还差一点像你。</p>",
+                unsafe_allow_html=True)
+            edited = st.text_area(
+                "", value=st.session_state.selected_line,
+                height=100, label_visibility="collapsed",
+                key="save_line_edit_vent")
+            col_confirm, col_cancel = st.columns([1, 1])
+            with col_confirm:
+                if st.button("就是这句", key="save_line_confirm_vent"):
+                    save_line(
+                        user_id=st.session_state.username,
+                        original_text=st.session_state.selected_line,
+                        edited_text=edited,
+                        source_amber_id=None
+                    )
+                    st.session_state.show_save_panel = False
+                    st.session_state.selected_line = None
+                    st.toast("已存入私人库 ✦")
+                    st.rerun()
+            with col_cancel:
+                if st.button("取消", key="save_line_cancel_vent"):
+                    st.session_state.show_save_panel = False
+                    st.session_state.selected_line = None
+                    st.rerun()
 
     # "我想写点什么"按钮和内嵌面板
     col_write, _ = st.columns([2, 3])
