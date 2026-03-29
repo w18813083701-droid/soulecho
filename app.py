@@ -762,7 +762,6 @@ if _mode not in ("login", "chat"):
 
 # 预热提示词缓存，避免进入聊天时出现 Running 提示
 if "prompts_warmed" not in st.session_state:
-    load_prompt("opening/amber.md")
     load_prompt("opening/direct_vent.md")
     load_prompt("opening/wall_refresh.md")
     load_prompt("system/daily_question.md")
@@ -1021,9 +1020,9 @@ elif st.session_state.mode == "amber_detail":
                 timeout=60.0,
             )
             stream = client_init.chat.completions.create(
-                model=FAST_OPENING_MODEL,
+                model=MASTER_MODEL,
                 messages=[
-                    {"role": "system", "content": load_prompt("opening/amber.md")},
+                    {"role": "system", "content": load_prompt("core/soul_observer.md").replace("{memories}", get_user_memories(st.session_state.username))},
                     {"role": "user", "content": f"琥珀文本：{content}"}
                 ],
                 stream=True
@@ -1566,7 +1565,7 @@ elif st.session_state.mode == "my_ambers":
     st.markdown("""
     <div style="text-align:center; padding:48px 0 24px 0;">
         <h1 style="font-size:26px; font-weight:300; letter-spacing:8px;
-                   color:#1a1a1a; margin:0;">我的琥珀</h1>
+                   color:#1a1a1a; margin:0;">我的</h1>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1607,6 +1606,15 @@ elif st.session_state.mode == "my_ambers":
     # 私人库入口
     if "show_saved_lines" not in st.session_state:
         st.session_state.show_saved_lines = False
+    if "show_my_ambers" not in st.session_state:
+        st.session_state.show_my_ambers = False
+
+    st.markdown("""
+<div style="margin:0 0 12px 0;">
+    <p style="font-size:13px; letter-spacing:4px; color:#b4a48a; margin:0;">私人库</p>
+    <hr style="border:0; border-top:1px solid rgba(0,0,0,0.06); margin:8px 0 0 0;">
+</div>
+""", unsafe_allow_html=True)
 
     saved_label = "私人库 ✦" if not st.session_state.show_saved_lines else "私人库 ✦ ▲"
     if st.button(saved_label, key="toggle_saved_lines"):
@@ -1654,76 +1662,89 @@ elif st.session_state.mode == "my_ambers":
                     delete_saved_line(line_id)
                     st.toast("已删除")
                     st.rerun()
-    
-    # 获取用户的所有琥珀，包括收到的信件数
-    client = get_db()
-    
-    # 获取用户的所有琥珀
-    ambers_result = client.table("ambers").select("id, content, created_at, weight, author_id").eq("author_id", user_id).order("created_at", desc=True).execute()
-    rows = ambers_result.data
-    
-    # 获取每个琥珀的消息数量
-    if rows:
-        amber_ids = [row["id"] for row in rows]
-        messages_result = client.table("messages").select("amber_id").in_("amber_id", amber_ids).eq("receiver_id", user_id).execute()
+
+    st.markdown("""
+<div style="margin:32px 0 12px 0;">
+    <p style="font-size:13px; letter-spacing:4px; color:#b4a48a; margin:0;">我的琥珀</p>
+    <hr style="border:0; border-top:1px solid rgba(0,0,0,0.06); margin:8px 0 0 0;">
+</div>
+""", unsafe_allow_html=True)
+
+    amber_label = "我的琥珀" if not st.session_state.show_my_ambers else "我的琥珀 ▲"
+    if st.button(amber_label, key="toggle_my_ambers"):
+        st.session_state.show_my_ambers = not st.session_state.show_my_ambers
+        st.rerun()
+
+    if st.session_state.show_my_ambers:
+        # 获取用户的所有琥珀，包括收到的信件数
+        client = get_db()
         
-        # 创建消息计数字典
-        message_counts = {}
-        for msg in messages_result.data:
-            amber_id = msg["amber_id"]
-            if amber_id in message_counts:
-                message_counts[amber_id] += 1
-            else:
-                message_counts[amber_id] = 1
+        # 获取用户的所有琥珀
+        ambers_result = client.table("ambers").select("id, content, created_at, weight, author_id").eq("author_id", user_id).order("created_at", desc=True).execute()
+        rows = ambers_result.data
         
-        # 将消息计数添加到琥珀数据中
-        for row in rows:
-            row["message_count"] = message_counts.get(row["id"], 0)
-    else:
-        rows = []
-    
-    if not rows:
-        st.markdown("<p style='text-align:center; color:#94a3b8; font-size:14px;'>你还没有留下过琥珀。</p>",
-            unsafe_allow_html=True)
-    else:
-        for row in rows:
-            amber_id = row["id"]
-            content = row["content"]
-            created_at = row["created_at"]
-            weight = row["weight"]
-            message_count = row["message_count"]
+        # 获取每个琥珀的消息数量
+        if rows:
+            amber_ids = [row["id"] for row in rows]
+            messages_result = client.table("messages").select("amber_id").in_("amber_id", amber_ids).eq("receiver_id", user_id).execute()
             
-            st.markdown(f"""
-            <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
-                        background:rgba(210,180,140,0.15); border:1px solid rgba(180,150,100,0.18);
-                        box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
-                <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 12px 0;">{content}</p>
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="color:#b4a48a; font-size:12px;">
-                        {created_at} · 信件: {message_count}
+            # 创建消息计数字典
+            message_counts = {}
+            for msg in messages_result.data:
+                amber_id = msg["amber_id"]
+                if amber_id in message_counts:
+                    message_counts[amber_id] += 1
+                else:
+                    message_counts[amber_id] = 1
+            
+            # 将消息计数添加到琥珀数据中
+            for row in rows:
+                row["message_count"] = message_counts.get(row["id"], 0)
+        else:
+            rows = []
+        
+        if not rows:
+            st.markdown("<p style='text-align:center; color:#94a3b8; font-size:14px;'>你还没有留下过琥珀。</p>",
+                unsafe_allow_html=True)
+        else:
+            for row in rows:
+                amber_id = row["id"]
+                content = row["content"]
+                created_at = row["created_at"]
+                weight = row["weight"]
+                message_count = row["message_count"]
+                
+                st.markdown(f"""
+                <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
+                            background:rgba(210,180,140,0.15); border:1px solid rgba(180,150,100,0.18);
+                            box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
+                    <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 12px 0;">{content}</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="color:#b4a48a; font-size:12px;">
+                            {created_at} · 信件: {message_count}
+                        </div>
                     </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # 删除按钮
-            if st.button(f"删除", key=f"delete_{amber_id}"):
-                # 使用事务删除相关记录
-                client = get_db()
-                try:
-                    # 删除相关的消息
-                    client.table("messages").delete().eq("amber_id", amber_id).execute()
-                    # 删除相关的停留记录
-                    client.table("user_affinity").delete().eq("amber_id", amber_id).execute()
-                    # 删除相关的每日上传记录
-                    client.table("daily_uploads").delete().eq("amber_id", amber_id).execute()
-                    # 删除琥珀本身
-                    client.table("ambers").delete().eq("id", amber_id).execute()
-                    st.toast("琥珀已删除", icon="🗑️")
-                    # 重新加载页面
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"删除失败: {e}")
+                """, unsafe_allow_html=True)
+                
+                # 删除按钮
+                if st.button(f"删除", key=f"delete_{amber_id}"):
+                    # 使用事务删除相关记录
+                    client = get_db()
+                    try:
+                        # 删除相关的消息
+                        client.table("messages").delete().eq("amber_id", amber_id).execute()
+                        # 删除相关的停留记录
+                        client.table("user_affinity").delete().eq("amber_id", amber_id).execute()
+                        # 删除相关的每日上传记录
+                        client.table("daily_uploads").delete().eq("amber_id", amber_id).execute()
+                        # 删除琥珀本身
+                        client.table("ambers").delete().eq("id", amber_id).execute()
+                        st.toast("琥珀已删除", icon="🗑️")
+                        # 重新加载页面
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"删除失败: {e}")
 
 # ─── write_post 模式 ─────────────────────────────────────
 
