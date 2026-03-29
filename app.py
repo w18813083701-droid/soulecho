@@ -228,10 +228,54 @@ def delete_saved_line(line_id):
 
 def get_ambers_for_wall(user_id, limit=12):
     client = get_db()
-    ambers_result = client.table("ambers").select("id, content, author_id, author_name, is_anonymous, weight").execute()
+    ambers_result = client.table("ambers").select(
+        "id, content, author_id, author_name, is_anonymous, weight, created_at"
+    ).order("created_at", desc=True).limit(200).execute()
     ambers = ambers_result.data
-    random.shuffle(ambers)
-    return ambers[:limit]
+    if not ambers:
+        return []
+
+    # 计算加权分数：越新权重越高，但保留随机性
+    now = datetime.now()
+    for a in ambers:
+        try:
+            created = datetime.fromisoformat(a["created_at"].replace("Z", "+00:00").replace("+00:00", ""))
+        except Exception:
+            created = now
+        age_hours = max((now - created).total_seconds() / 3600, 0.1)
+        # 时间衰减：24小时内权重最高，之后逐渐降低，但永远不为0
+        time_score = 1 / (1 + age_hours / 24)
+        # 加入随机扰动，避免每次结果完全一样
+        a["_score"] = time_score * random.uniform(0.5, 1.5)
+
+    # 按分数排序后取前 limit 个
+    ambers.sort(key=lambda x: x["_score"], reverse=True)
+
+    # 去重逻辑
+    recently_seen: list = st.session_state.get("amber_seen_history", [])
+    seen_set = set(recently_seen)
+
+    fresh = [a for a in ambers if a["id"] not in seen_set]
+    stale = [a for a in ambers if a["id"] in seen_set]
+
+    selected = fresh[:limit]
+    if len(selected) < limit:
+        random.shuffle(stale)
+        selected += stale[:limit - len(selected)]
+
+    new_seen_ids = [a["id"] for a in selected[:4]]
+    combined = recently_seen + new_seen_ids
+    st.session_state.amber_seen_history = combined[-(5 * 4):]
+
+    return selected
+
+def prefetch_ambers_background(user_id):
+    """后台预取下一批琥珀，存入 session_state"""
+    try:
+        next_batch = get_ambers_for_wall(user_id, limit=50)
+        st.session_state._prefetched_ambers = next_batch[:4]
+    except Exception:
+        pass
 
 def record_dwell(user_id, amber_id, seconds):
     client = get_db()
@@ -373,11 +417,17 @@ def light_up_comment(message_id, sender_id, amber_id):
 def can_reply_free(user_id, amber_id, other_user_id):
     """判断这对用户在这块琥珀下是否还有免费回信机会。
     规则：同一对用户针对同一块琥珀，来回总次数超过1次后需要花积分。"""
-    client = get_db()
-    result = client.table("messages").select("id", count="exact").eq("amber_id", amber_id).or_(
-        f"and(sender_id.eq.{user_id},receiver_id.eq.{other_user_id}),and(sender_id.eq.{other_user_id},receiver_id.eq.{user_id})"
-    ).execute()
-    return result.count <= 1
+    for attempt in range(3):
+        try:
+            client = get_db()
+            result = client.table("messages").select("id", count="exact").eq("amber_id", amber_id).or_(
+                f"and(sender_id.eq.{user_id},receiver_id.eq.{other_user_id}),and(sender_id.eq.{other_user_id},receiver_id.eq.{user_id})"
+            ).execute()
+            return result.count <= 1
+        except Exception:
+            if attempt == 2:
+                return True
+            time.sleep(0.5)
 
 def deduct_stamp(user_id):
     """扣除10积分邮票，订阅用户免费，返回是否成功"""
@@ -518,8 +568,15 @@ if "show_save_panel" not in st.session_state:
 if "selected_line" not in st.session_state:
     st.session_state.selected_line = None
 
+if "amber_seen_history" not in st.session_state:
+    st.session_state.amber_seen_history = []
+
 if "wall_refresh_count" not in st.session_state:
     st.session_state.wall_refresh_count = 0
+if "wall_display_ambers" not in st.session_state:
+    st.session_state.wall_display_ambers = []
+if "_prefetched_ambers" not in st.session_state:
+    st.session_state._prefetched_ambers = None
 if "wall_ambers" not in st.session_state:
     st.session_state.wall_ambers = []
 if "wall_amber_index" not in st.session_state:
@@ -569,18 +626,19 @@ if st.session_state.username is None:
         login_password = st.text_input("密码", type="password", key=f"login_password_{key_suffix}")
         if st.button("登录", key="btn_login"):
             if login_username and login_password:
-                # 清理用户名：去除前后空格并转为小写
-                cleaned_username = login_username.strip().lower()
-                client = get_db()
-                hashed_pw = hashlib.sha256(login_password.encode()).hexdigest()
-                result = client.table("users").select("*").eq("username", cleaned_username).eq("password", hashed_pw).execute()
-                user = result.data[0] if result.data else None
-                if user:
-                    st.session_state.username = user["username"]
-                    get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", user["username"]).execute()
-                    st.rerun()
-                else:
-                    st.error("昵称或密码错误")
+                with st.spinner("登录中…"):
+                    # 清理用户名：去除前后空格并转为小写
+                    cleaned_username = login_username.strip().lower()
+                    client = get_db()
+                    hashed_pw = hashlib.sha256(login_password.encode()).hexdigest()
+                    result = client.table("users").select("*").eq("username", cleaned_username).eq("password", hashed_pw).execute()
+                    user = result.data[0] if result.data else None
+                    if user:
+                        st.session_state.username = user["username"]
+                        get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", user["username"]).execute()
+                        st.rerun()
+                    else:
+                        st.error("昵称或密码错误")
             else:
                 st.warning("请输入昵称和密码")
     else:
@@ -589,20 +647,21 @@ if st.session_state.username is None:
         reg_password = st.text_input("密码", type="password", key=f"reg_password_{key_suffix}")
         if st.button("注册", key="btn_register"):
             if reg_username and reg_password:
-                # 清理用户名：去除前后空格并转为小写
-                cleaned_username = reg_username.strip().lower()
-                client = get_db()
-                try:
-                    hashed_pw = hashlib.sha256(reg_password.encode()).hexdigest()
-                    client.table("users").insert({
-                        "username": cleaned_username,
-                        "password": hashed_pw
-                    }).execute()
-                    st.session_state.username = cleaned_username
-                    st.success("注册成功！")
-                    st.rerun()
-                except Exception:
-                    st.error("这个昵称已经被使用了")
+                with st.spinner("注册中…"):
+                    # 清理用户名：去除前后空格并转为小写
+                    cleaned_username = reg_username.strip().lower()
+                    client = get_db()
+                    try:
+                        hashed_pw = hashlib.sha256(reg_password.encode()).hexdigest()
+                        client.table("users").insert({
+                            "username": cleaned_username,
+                            "password": hashed_pw
+                        }).execute()
+                        st.session_state.username = cleaned_username
+                        st.success("注册成功！")
+                        st.rerun()
+                    except Exception:
+                        st.error("这个昵称已经被使用了")
             else:
                 st.warning("请输入昵称和密码")
     
@@ -731,16 +790,15 @@ if st.session_state.mode == "gallery":
         "<hr style='border:0; border-top:1px solid rgba(0,0,0,0.06); margin:16px 0 28px 0;'>",
         unsafe_allow_html=True)
 
-    # 初始化或获取琥珀列表
-    if "all_ambers" not in st.session_state:
-        # 第一次加载时从数据库获取较多琥珀
-        st.session_state.all_ambers = get_ambers_for_wall(user_id, limit=50)
-    
-    # 从缓存的琥珀中随机挑选4个
-    if st.session_state.all_ambers:
-        ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
-    else:
-        ambers = []
+    # 每次进入 gallery 都重新从数据库拉取，确保能看到最新琥珀
+    if "wall_display_ambers" not in st.session_state or not st.session_state.wall_display_ambers:
+        fresh_pool = get_ambers_for_wall(user_id, limit=50)
+        st.session_state.all_ambers = fresh_pool
+        st.session_state.wall_display_ambers = fresh_pool[:4]
+        # 第一次加载完，立刻后台预取下一批
+        threading.Thread(target=prefetch_ambers_background, args=(user_id,), daemon=True).start()
+
+    ambers = st.session_state.wall_display_ambers or []
     
     if "wall_start_time" not in st.session_state:
         st.session_state.wall_start_time = time.time()
@@ -798,12 +856,20 @@ if st.session_state.mode == "gallery":
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
     st.markdown("<div style='text-align:center; margin-top:24px;'>", unsafe_allow_html=True)
-    if st.button("↺  换几块", key="refresh_wall"):
+    if st.button("↺  换几块", key="refresh_wall", type="primary"):
         st.session_state.wall_refresh_count = wall_refresh + 1
         st.session_state.wall_start_time = time.time()
-        # 重新随机挑选琥珀，无需重新查询数据库
-        if st.session_state.all_ambers:
-            st.session_state.wall_ambers = random.sample(st.session_state.all_ambers, min(4, len(st.session_state.all_ambers)))
+        # 优先用预取好的数据，实现秒切
+        if st.session_state.get("_prefetched_ambers"):
+            st.session_state.wall_display_ambers = st.session_state._prefetched_ambers
+            st.session_state._prefetched_ambers = None
+            # 点击后立刻在后台取下一批
+            threading.Thread(target=prefetch_ambers_background, args=(user_id,), daemon=True).start()
+        else:
+            # 没有预取数据时降级为直接查询
+            fresh_pool = get_ambers_for_wall(user_id, limit=50)
+            st.session_state.all_ambers = fresh_pool
+            st.session_state.wall_display_ambers = fresh_pool[:4]
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -853,6 +919,8 @@ elif st.session_state.mode == "amber_detail":
     </div>
     """, unsafe_allow_html=True)
 
+    st.session_state.setdefault("_btn_feedback", "")
+
     # 手动切换模式
     col_letter, col_chat = st.columns(2)
     with col_letter:
@@ -861,6 +929,7 @@ elif st.session_state.mode == "amber_detail":
             st.rerun()
     with col_chat:
         if st.button("和AI聊这块琥珀", use_container_width=True):
+            st.toast("正在唤醒琥珀…")
             st.session_state.chat_mode = "chat"
             st.rerun()
 
