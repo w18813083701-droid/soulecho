@@ -25,202 +25,105 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    #MainMenu {visibility: hidden;} 
+    footer {visibility: hidden;} 
+    header {visibility: hidden;} 
 
-    .stApp {
-        background-color: #f4efe6;
-    }
+    /* 磨砂纸张肌理：利用径向渐变打破死白，中心微亮，边缘深沉 */ 
+    .stApp { 
+        background-color: #F4F4F4; 
+        background-image: radial-gradient(circle at 50% 0%, #FFFFFF 0%, #EAEAEA 100%); 
+        font-family: "Noto Serif SC", "Songti SC", serif; 
+    } 
 
-    .block-container {
-        max-width: 600px !important;
-        padding-top: 2rem !important;
-        padding-bottom: 4rem !important;
-    }
+    .block-container { 
+        max-width: 600px !important; 
+        padding-top: 2rem !important; 
+        padding-bottom: 4rem !important; 
+    } 
 
-    .stButton > button {
-        background: transparent;
-        border: 1px solid rgba(0,0,0,0.15);
-        color: #2d2d2d;
-        border-radius: 6px;
-        font-size: 13px;
-        letter-spacing: 0.5px;
-        padding: 6px 16px;
-        transition: all 0.2s ease;
-    }
-    .stButton > button:hover {
-        background: rgba(0,0,0,0.04);
-        border-color: rgba(0,0,0,0.3);
-    }
+    /* 标题重塑：加粗，拉开字间距，形成强烈的骨架感 */ 
+    h1 { 
+        font-family: "Noto Serif SC", "Songti SC", serif !important; 
+        font-weight: 600 !important; 
+        letter-spacing: 0.3em !important; 
+        color: #111111 !important; 
+    } 
 
-    .stChatMessage {
-        background: transparent !important;
-        border: none !important;
-        padding: 8px 0 !important;
-    }
-    .stChatMessage p {
-        font-size: 15px;
-        line-height: 1.9;
-        color: #1a1a1a;
-        letter-spacing: 0.02em;
-    }
+    /* 全局按钮：引入衬线体，悬浮时透出点睛的暗绯红 */ 
+    .stButton > button { 
+        font-family: "Noto Serif SC", "Songti SC", serif !important; 
+        background: transparent; 
+        border: 1px solid rgba(0,0,0,0.1); 
+        color: #2D2D2D; 
+        border-radius: 4px; /* 更凌厉的直角微圆 */ 
+        font-size: 13px; 
+        letter-spacing: 0.1em; 
+        padding: 8px 16px; 
+        transition: all 0.3s ease; 
+    } 
+    .stButton > button:hover { 
+        background: #7A1F1F; /* 点睛之色：暗绯红 */ 
+        color: #FFFFFF !important; 
+        border-color: #7A1F1F; 
+        box-shadow: 0 4px 12px rgba(122,31,31,0.2); 
+    } 
 
-    .stTextArea textarea, .stTextInput input {
-        background: rgba(255,255,255,0.55) !important;
-        border: 1px solid rgba(0,0,0,0.12) !important;
-        border-radius: 8px !important;
-        font-size: 14px;
-        color: #1a1a1a;
-    }
+    /* 黑曜石卡片：保持深邃，字体改为高级衬线体 */ 
+    [data-testid="stButton"] button[kind="secondary"].amber-card-btn { 
+        width: 100%; 
+        text-align: left; 
+        white-space: normal; 
+        height: auto; 
+        padding: 24px 22px; 
+        border-radius: 6px; 
+        background: #101215; 
+        border: 1px solid #222; 
+        box-shadow: 0 16px 32px rgba(0,0,0,0.15); 
+        font-size: 14px; 
+        line-height: 1.9; 
+        color: #E8E8E8; 
+        cursor: pointer; 
+        font-family: "Noto Serif SC", "Songti SC", serif !important; 
+        transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); 
+    } 
+    [data-testid="stButton"] button[kind="secondary"].amber-card-btn:hover { 
+        transform: translateY(-2px); 
+        border-color: #333; 
+        background: #16181C; 
+    } 
 
-    .stChatFloatingInputContainer {
-        background: rgba(244,239,230,0.96) !important;
-        border-top: 1px solid rgba(0,0,0,0.06) !important;
-        padding-bottom: 16px;
-    }
+    /* 输入框极简处理 */ 
+    .stTextArea textarea, .stTextInput input { 
+        font-family: "Noto Serif SC", "Songti SC", serif !important; 
+        background: rgba(255,255,255,0.8) !important; 
+        border: 1px solid rgba(0,0,0,0.08) !important; 
+        border-radius: 4px !important; 
+        font-size: 14px; 
+        color: #1a1a1a; 
+    } 
+    .stTextArea textarea:focus, .stTextInput input:focus { 
+        border-color: #7A1F1F !important; 
+        box-shadow: 0 0 0 1px rgba(122,31,31,0.2) !important; 
+    } 
 
+    /* 聊天消息字体 */ 
+    .stChatMessage p { 
+        font-family: "Noto Serif SC", "Songti SC", serif !important; 
+        font-size: 15px; 
+        line-height: 1.9; 
+        color: #1a1a1a; 
+    } 
 
-
-    [data-testid="stSidebar"] {
-        background: #ede8df !important;
-    }
-
-    .amber-bubble {
-        cursor: pointer;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        display: inline-block;
-    }
-    .amber-bubble:hover {
-        transform: scale(1.02) rotate(0deg) !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    }
-
-    /* 把特定key的按钮变成卡片样式 */
-    [data-testid="stButton"] button[kind="secondary"].amber-card-btn {
-        width: 100%;
-        text-align: left;
-        white-space: normal;
-        height: auto;
-        padding: 20px 22px;
-        border-radius: 14px;
-        background: linear-gradient(135deg, rgba(210,180,140,0.18), rgba(255,248,235,0.55));
-        border: 1px solid rgba(180,150,100,0.2);
-        box-shadow: 2px 3px 12px rgba(0,0,0,0.05);
-        font-size: 14px;
-        line-height: 1.85;
-        color: #2d2d2d;
-        cursor: pointer;
-    }
-
-    /* 禁用过渡动画 */
-    .element-container {
-        animation: none !important;
-        transition: none !important;
-    }
-    .stApp > header {
-        transition: none !important;
-    }
-
-    /* 强制覆盖 Streamlit 运行时的页面发灰和动画 */
-    [data-testid="stAppViewContainer"],
-    [data-testid="stAppViewBlockContainer"],
-    .stApp {
-        transition: none !important;
-        opacity: 1 !important;
-        animation: none !important;
-    }
-    /* 隐藏右上角的 running 状态小人/标识 */
-    [data-testid="stStatusWidget"] {
-        visibility: hidden;
-    }
-
-    /* 隐藏所有可能的加载指示器 */
-    div[data-testid="stStatusWidget"],
-    div[data-testid="stToolbar"],
-    div[data-testid="stDecoration"] {
-        display: none !important;
-    }
-
-    /* 禁止任何元素产生过渡动画 */
-    * {
-        transition: none !important;
-        animation: none !important;
-        transform: none !important;
-    }
-
-    /* 禁用所有可能的动画类 */
-    .animated, .fade-in, .fade-out, .slide-in, .slide-out {
-        animation: none !important;
-        transition: none !important;
-    }
-
-    /* 手机端强制显示侧边栏 */
-    @media (max-width: 640px) {
-        /* 让侧边栏始终可见，不隐藏 */
-        [data-testid="stSidebar"] {
-            position: relative !important;
-            width: 200px !important;
-            margin-left: 0 !important;
-            transform: none !important;
-            visibility: visible !important;
-            display: block !important;
-        }
-        /* 调整主内容区域，避免被侧边栏覆盖 */
-        .main .block-container {
-            margin-left: 200px !important;
-            padding-left: 1rem !important;
-            max-width: calc(100% - 200px) !important;
-        }
-        /* 隐藏Streamlit默认的汉堡菜单按钮 */
-        button[kind="headerNoPadding"] {
-            display: none !important;
-        }
-    }
-
-    /* 隐藏侧边栏和汉堡按钮 */
-    [data-testid="stSidebar"],
-    [data-testid="collapsedControl"] {
-        display: none !important;
-    }
-
-    /* 底部留出导航栏空间 */
-    .block-container {
-        padding-bottom: 80px !important;
-    }
-
-    /* 底部导航栏 */
-    .bottom-nav {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        height: 62px;
-        background: rgba(244,239,230,0.97);
-        border-top: 1px solid rgba(0,0,0,0.08);
-        display: flex;
-        align-items: center;
-        justify-content: space-around;
-        z-index: 9999;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-    }
-    .nav-item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        flex: 1;
-        height: 100%;
-        gap: 3px;
-    }
-    .nav-icon { font-size: 20px; line-height: 1; }
-    .nav-label {
-        font-size: 10px;
-        color: #94a3b8;
-        letter-spacing: 0.5px;
-    }
-    .nav-item.active .nav-label { color: #1a1a1a; font-weight: 500; }
-    .nav-item { cursor: pointer; }
-    .nav-item:active { opacity: 0.6; }
+    /* 底部导航栏适配 */ 
+    .block-container { padding-bottom: 80px !important; } 
+    .bottom-nav { 
+        position: fixed; bottom: 0; left: 0; right: 0; height: 62px; 
+        background: rgba(245,245,245,0.9); 
+        border-top: 1px solid rgba(0,0,0,0.03); 
+        display: flex; align-items: center; justify-content: space-around; 
+        z-index: 9999; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); 
+    } 
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
@@ -716,11 +619,11 @@ if _mode not in ("login"):
         position: fixed !important;
         bottom: 0 !important; left: 0 !important; right: 0 !important;
         z-index: 9999 !important;
-        background: rgba(244,239,230,0.97) !important;
-        border-top: 1px solid rgba(0,0,0,0.08) !important;
+        background: rgba(250,250,250,0.97) !important;
+        border-top: none !important;
         padding: 0 !important; margin: 0 !important;
         max-width: 100% !important;
-        backdrop-filter: blur(8px) !important;
+        backdrop-filter: blur(12px) !important;
     }
     button[key="nav_gallery"],
     button[key="nav_write"],
@@ -730,7 +633,7 @@ if _mode not in ("login"):
         box-shadow: none !important;
         height: 62px !important;
         font-size: 11px !important;
-        color: #94a3b8 !important;
+        color: #888888 !important;
         letter-spacing: 0.5px !important;
         padding: 0 !important;
     }
@@ -738,23 +641,23 @@ if _mode not in ("login"):
     """, unsafe_allow_html=True)
 
     _labels = {
-        "gallery": "🪨\n广场",
-        "write_amber": "✍️\n写琥珀",
-        "my_ambers": "👤\n我的",
+        "gallery": "广 场",
+        "write_amber": "写 琥 珀",
+        "my_ambers": "我 的",
     }
     _c1, _c2, _c3 = st.columns(3)
     with _c1:
-        _label = ("🪨\n· 广场 ·" if _mode == "gallery" else "🪨\n广场")
+        _label = ("·  广 场  ·" if _mode == "gallery" else "广 场")
         if st.button(_label, key="nav_gallery", use_container_width=True):
             st.session_state.mode = "gallery"
             st.rerun()
     with _c2:
-        _label = ("✍️\n· 写琥珀 ·" if _mode == "write_amber" else "✍️\n写琥珀")
+        _label = ("·  写 琥 珀  ·" if _mode == "write_amber" else "写 琥 珀")
         if st.button(_label, key="nav_write", use_container_width=True):
             st.session_state.mode = "write_amber"
             st.rerun()
     with _c3:
-        _label = ("👤\n· 我的 ·" if _mode == "my_ambers" else "👤\n我的")
+        _label = ("·  我 的  ·" if _mode == "my_ambers" else "我 的")
         if st.button(_label, key="nav_mine", use_container_width=True):
             st.session_state.mode = "my_ambers"
             st.rerun()
@@ -787,7 +690,7 @@ if st.session_state.mode == "gallery":
 
     st.markdown(f"""
     <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
-        <p style="color:#b4a48a; font-size:13px; margin:0; letter-spacing:0.5px;">{daily_q}</p>
+        <p style="font-family:'Songti SC', serif; color:#555; font-size:14px; margin:0; letter-spacing:1px;">{daily_q}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -818,7 +721,7 @@ if st.session_state.mode == "gallery":
                 st.rerun()
         with col_s:
             st.markdown(
-                "<p style='color:#b4a48a; font-size:12px; margin-top:8px; line-height:1.6;'>"
+                "<p style='color:#888888; font-size:12px; margin-top:8px; line-height:1.6;'>"
                 "每天2次免费额度<br>给人写信 +10积分<br>发帖消耗30积分</p>",
                 unsafe_allow_html=True)
 
@@ -877,24 +780,15 @@ if st.session_state.mode == "gallery":
             
             lay = layouts[i]
             
-            # weight阈值决定皮肤
-            weight = row.get("weight", 1.0) if hasattr(row, "get") else dict(row).get("weight", 1.0)
-            if weight > 2.0:
-                bg = "linear-gradient(135deg, rgba(210,170,90,0.22), rgba(255,240,200,0.6))"
-                border = "1px solid rgba(180,140,60,0.3)"
-            else:
-                bg = "linear-gradient(135deg, rgba(210,180,140,0.15), rgba(255,248,235,0.5))"
-                border = "1px solid rgba(180,150,100,0.18)"
-            
             with cols[lay["col"]]:
                 st.markdown(f"""
                 <div style="margin-top:{lay['margin_top']}; margin-bottom:20px; 
-                            padding:20px 22px; border-radius:14px; 
-                            background:{bg}; border:{border}; 
+                            padding:24px 22px; border-radius:8px; 
+                            background:#12151A; color:#EBEBF5; border:none; 
                             transform:rotate({lay['rot']}deg); 
-                            box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
-                    <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 10px 0; text-align:center;">{preview}</p>
-                    <p style="color:#b4a48a; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
+                            box-shadow:0 12px 32px rgba(0,0,0,0.08);">
+                    <p style="color:#EBEBF5; font-size:14px; line-height:1.85; margin:0 0 10px 0; text-align:center;">{preview}</p>
+                    <p style="color:#A0A0B0; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 st.button("打开", key=f"open_{amber_id}",
@@ -950,9 +844,9 @@ elif st.session_state.mode == "amber_detail":
 
     st.markdown(f"""
     <div style="max-width:540px; margin:16px auto 16px auto;
-                padding:16px 32px; border-radius:14px;
-                background:rgba(0,0,0,0.03);
-                border:1px solid rgba(0,0,0,0.07);">
+                padding:24px 32px; border-radius:8px;
+                background:rgba(0,0,0,0.02);
+                border:none;">
         <p style="color:#1a1a1a; font-size:16px; line-height:1.9; margin:0;">
             {content}
         </p>
@@ -990,7 +884,7 @@ elif st.session_state.mode == "amber_detail":
                 user_points_now = get_user_points(user_id)
                 if not is_free_send:
                     st.markdown(
-                        f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points_now}）</p>",
+                        f"<p style='color:#888888; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points_now}）</p>",
                         unsafe_allow_html=True)
                 label_send = "寄出去（-10积分）" if not is_free_send else "寄出去"
                 submit_button = st.form_submit_button(label_send)
@@ -1053,7 +947,7 @@ elif st.session_state.mode == "amber_detail":
             recent_ai = list(reversed(recent_ai))
             
             st.markdown(
-                "<p style='color:#b4a48a; font-size:12px; margin:12px 0 8px 0;'>选一句让你停住的话</p>",
+                "<p style='color:#888888; font-size:12px; margin:12px 0 8px 0;'>选一句让你停住的话</p>",
                 unsafe_allow_html=True)
             
             for i, line in enumerate(recent_ai):
@@ -1064,8 +958,8 @@ elif st.session_state.mode == "amber_detail":
             
             if st.session_state.get("selected_line"):
                 st.markdown(
-                    "<p style='color:#b4a48a; font-size:12px; margin:12px 0 4px 0;'>这句话还差一点像你。</p>",
-                    unsafe_allow_html=True)
+                "<p style='color:#888888; font-size:12px; margin:12px 0 4px 0;'>这句话还差一点像你。</p>",
+                unsafe_allow_html=True)
                 edited = st.text_area(
                     "", value=st.session_state.selected_line,
                     height=100, label_visibility="collapsed",
@@ -1098,10 +992,10 @@ elif st.session_state.mode == "amber_detail":
 
         if st.session_state.show_write_panel:
             with st.container():
-                st.markdown(
-                    "<div style='padding:16px; margin:8px 0; border-radius:10px; "
-                    "background:rgba(180,150,100,0.08); border:1px solid rgba(180,150,100,0.15);'>",
-                    unsafe_allow_html=True)
+                st.markdown(f"""
+                <div style="padding:24px; margin:8px 0; border-radius:8px; 
+                background:rgba(0,0,0,0.02); border:none;">
+                """, unsafe_allow_html=True)
 
                 col_p, col_a = st.columns(2)
                 with col_p:
@@ -1119,7 +1013,7 @@ elif st.session_state.mode == "amber_detail":
                             unsafe_allow_html=True)
                     else:
                         st.markdown(
-                            f"<p style='color:#b4a48a; font-size:12px;'>写下此刻想说的话，随机落到陌生人信箱。消耗30积分（当前：{user_points}）</p>",
+                            f"<p style='color:#888888; font-size:12px;'>写下此刻想说的话，随机落到陌生人信箱。消耗30积分（当前：{user_points}）</p>",
                             unsafe_allow_html=True)
                         with st.form(key=f"inline_post_form_{st.session_state.mode}", clear_on_submit=True):
                             post_text = st.text_area("", placeholder="此刻最想让某个陌生人听到的话……（最多100字）",
@@ -1146,7 +1040,7 @@ elif st.session_state.mode == "amber_detail":
                                 unsafe_allow_html=True)
                         else:
                             st.markdown(
-                                f"<p style='color:#b4a48a; font-size:12px;'>今日额度已用完，再发一块消耗20积分（当前：{user_points}）</p>",
+                                f"<p style='color:#888888; font-size:12px;'>今日额度已用完，再发一块消耗20积分（当前：{user_points}）</p>",
                                 unsafe_allow_html=True)
                             with st.form(key=f"inline_amber_form_{st.session_state.mode}", clear_on_submit=True):
                                 amber_text = st.text_area("", placeholder="今天最有重量的那句话……（最多100字）",
@@ -1200,13 +1094,12 @@ elif st.session_state.mode == "inbox":
     posts_received = client_db.table("posts").select("id, content, created_at, is_replied, sender_id").eq("receiver_id", user_id).order("created_at", desc=True).execute()
     if posts_received.data:
         st.markdown(
-            "<p style='color:#b4a48a; font-size:13px; letter-spacing:1px; margin-bottom:12px;'>帖</p>",
+            "<p style='color:#888888; font-size:13px; letter-spacing:1px; margin-bottom:12px;'>帖</p>",
             unsafe_allow_html=True)
         for post in posts_received.data:
             st.markdown(f"""
-            <div style="padding:18px 22px; margin-bottom:14px; border-radius:10px;
-                        background:rgba(180,150,100,0.08); border:1px solid rgba(180,150,100,0.2);">
-                <p style="color:#1a1a1a; font-size:15px; line-height:1.8; margin:0;">
+            <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
+                <p style="color:#2D2D2D; font-size:15px; line-height:1.8; margin:0;">
                     {post["content"]}
                 </p>
                 <p style="color:#94a3b8; font-size:11px; margin:8px 0 0 0;">
@@ -1243,12 +1136,11 @@ elif st.session_state.mode == "inbox":
             is_lit = letter.get("is_lit", False)
             is_own_amber = letter.get("amber_author_id") == user_id
             st.markdown(f"""
-            <div style="padding:18px 22px; margin-bottom:14px; border-radius:10px;
-                        background:rgba(0,0,0,0.02); border:1px solid rgba(0,0,0,0.06);">
+            <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
                 <p style="color:#94a3b8; font-size:12px; margin:0 0 8px 0;">
                     关于：{amber_preview}
                 </p>
-                <p style="color:#1a1a1a; font-size:15px; line-height:1.8; margin:0;">
+                <p style="color:#2D2D2D; font-size:15px; line-height:1.8; margin:0;">
                     {letter["content"]}
                 </p>
                 <p style="color:#94a3b8; font-size:11px; margin:8px 0 0 0;">
@@ -1275,8 +1167,8 @@ elif st.session_state.mode == "inbox":
                     else:
                         if not is_free:
                             st.markdown(
-                                f"<p style='color:#b4a48a; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points}）</p>",
-                                unsafe_allow_html=True)
+                                f"<p style='color:#888888; font-size:12px;'>续信需要消耗10积分邮票（当前积分：{user_points}）</p>",
+                            unsafe_allow_html=True)
                         with st.form(key=f"reply_form_{letter['id']}", clear_on_submit=True):
                             reply_text = st.text_area("", placeholder="写下回信……", height=100,
                                 label_visibility="collapsed")
@@ -1318,7 +1210,7 @@ elif st.session_state.mode == "write_amber":
 
     st.markdown(f"""
     <div style="max-width:500px; margin:0 auto 24px auto; padding:8px 0; text-align:center;">
-        <p style="color:#b4a48a; font-size:13px; margin:0; letter-spacing:0.5px;">{daily_q}</p>
+        <p style="font-family:'Songti SC', serif; color:#555; font-size:14px; margin:0; letter-spacing:1px;">{daily_q}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1329,9 +1221,8 @@ elif st.session_state.mode == "write_amber":
     else:
         with st.form("upload_form", clear_on_submit=True):
             st.markdown("""
-            <div style="padding:12px 16px; margin-bottom:16px; border-radius:8px;
-                        background:rgba(180,150,100,0.1); border-left:3px solid rgba(180,150,100,0.4);">
-                <p style="color:#8a7055; font-size:13px; margin:0; line-height:1.6;">
+            <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
+                <p style="color:#2D2D2D; font-size:13px; margin:0; line-height:1.6;">
                     每天有两次机会，用心留下。
                 </p>
             </div>
@@ -1369,15 +1260,15 @@ elif st.session_state.mode == "my_ambers":
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div style="background:rgba(210,180,140,0.12);border-radius:12px;padding:16px 20px;margin-bottom:24px;">', unsafe_allow_html=True)
+    st.markdown('<div style="background:rgba(0,0,0,0.02);border-radius:8px;padding:24px;margin-bottom:24px;border:none;">', unsafe_allow_html=True)
     user_id = st.session_state.username
     _info = get_user_info(user_id)
     _points = _info["points"]
     _subbed = _info["is_subscribed"]
-    st.markdown(f"<p style='font-size:13px; color:#b4a48a;'>积分：{_points}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size:13px; color:#888888;'>积分：{_points}</p>", unsafe_allow_html=True)
     if _subbed:
         st.markdown(
-            "<p style='font-size:12px; color:#b4a48a; margin:0;'>订阅中 ✦</p>",
+            "<p style='font-size:12px; color:#888888; margin:0;'>订阅中 ✦</p>",
             unsafe_allow_html=True)
     if st.session_state.mode in ["amber_detail", "inbox"]:
         if st.button("← 首页", key="back_home"):
@@ -1411,7 +1302,7 @@ elif st.session_state.mode == "my_ambers":
 
     st.markdown("""
 <div style="margin:0 0 12px 0;">
-    <p style="font-size:13px; letter-spacing:4px; color:#b4a48a; margin:0;">私人库</p>
+    <p style="font-size:13px; letter-spacing:4px; color:#888888; margin:0;">私人库</p>
     <hr style="border:0; border-top:1px solid rgba(0,0,0,0.06); margin:8px 0 0 0;">
 </div>
 """, unsafe_allow_html=True)
@@ -1435,24 +1326,20 @@ elif st.session_state.mode == "my_ambers":
                 
                 if amber_content:
                     st.markdown(f"""
-                    <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
-                                background:rgba(210,180,140,0.1); border:1px solid rgba(180,150,100,0.15);
-                                box-shadow:2px 3px 12px rgba(0,0,0,0.04);">
+                    <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
                         <p style="color:#94a3b8; font-size:12px; line-height:1.7; margin:0 0 10px 0;
-                                  border-left:2px solid rgba(180,150,100,0.3); padding-left:10px;">
+                                  border-left:2px solid rgba(0,0,0,0.1); padding-left:10px;">
                             {amber_content}
                         </p>
-                        <p style="color:#2d2d2d; font-size:15px; line-height:1.9; margin:0;">
+                        <p style="color:#2D2D2D; font-size:15px; line-height:1.9; margin:0;">
                             {edited_text}
                         </p>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
                     st.markdown(f"""
-                    <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
-                                background:rgba(210,180,140,0.1); border:1px solid rgba(180,150,100,0.15);
-                                box-shadow:2px 3px 12px rgba(0,0,0,0.04);">
-                        <p style="color:#2d2d2d; font-size:15px; line-height:1.9; margin:0;">
+                    <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
+                        <p style="color:#2D2D2D; font-size:15px; line-height:1.9; margin:0;">
                             {edited_text}
                         </p>
                     </div>
@@ -1465,7 +1352,7 @@ elif st.session_state.mode == "my_ambers":
 
     st.markdown("""
 <div style="margin:32px 0 12px 0;">
-    <p style="font-size:13px; letter-spacing:4px; color:#b4a48a; margin:0;">我的琥珀</p>
+    <p style="font-size:13px; letter-spacing:4px; color:#888888; margin:0;">我的琥珀</p>
     <hr style="border:0; border-top:1px solid rgba(0,0,0,0.06); margin:8px 0 0 0;">
 </div>
 """, unsafe_allow_html=True)
@@ -1515,12 +1402,10 @@ elif st.session_state.mode == "my_ambers":
                 message_count = row["message_count"]
                 
                 st.markdown(f"""
-                <div style="padding:20px 22px; margin-bottom:16px; border-radius:14px;
-                            background:rgba(210,180,140,0.15); border:1px solid rgba(180,150,100,0.18);
-                            box-shadow:2px 3px 12px rgba(0,0,0,0.05);">
-                    <p style="color:#2d2d2d; font-size:14px; line-height:1.85; margin:0 0 12px 0;">{content}</p>
+                <div style="padding:24px; margin-bottom:16px; border-radius:4px; background:rgba(0,0,0,0.03); border:none; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
+                    <p style="color:#2D2D2D; font-size:14px; line-height:1.85; margin:0 0 12px 0;">{content}</p>
                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="color:#b4a48a; font-size:12px;">
+                        <div style="color:#888888; font-size:12px;">
                             {created_at} · 信件: {message_count}
                         </div>
                     </div>
@@ -1564,7 +1449,7 @@ elif st.session_state.mode == "write_post":
     user_points = get_user_points(user_id)
     st.markdown(f"""
     <div style="max-width:500px; margin:0 auto 24px auto; text-align:center;">
-        <p style="color:#b4a48a; font-size:13px; margin:0; line-height:1.8;">
+        <p style="color:#888888; font-size:13px; margin:0; line-height:1.8;">
             写下此刻想说的话，随机落到一个陌生人的信箱。消耗30积分。三天内无人回复，退还15积分。
             当前积分：{user_points}
         </p>
