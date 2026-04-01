@@ -1414,10 +1414,40 @@ elif st.session_state.mode == "my_ambers":
                     </div>
                     """, unsafe_allow_html=True)
                 
-                if st.button("删除", key=f"delete_saved_{line_id}"):
-                    delete_saved_line(line_id)
-                    st.toast("已删除")
-                    st.rerun()
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    if st.button("删除", key=f"delete_saved_{line_id}"):
+                        delete_saved_line(line_id)
+                        st.toast("已删除")
+                        st.rerun()
+                with col2:
+                    if st.button("🖼 分享", key=f"share_{line_id}"):
+                        st.session_state[f"show_card_{line_id}"] = not st.session_state.get(f"show_card_{line_id}", False)
+
+                if st.session_state.get(f"show_card_{line_id}"):
+                    from utils.share_card import  generate_share_card
+                    template = st.radio(
+                        "选择底图",
+                        ["obsidian", "white", "cinema"],
+                        format_func=lambda x: {"obsidian": "黑曜石", "white": "白", "cinema": "电影票"}[x],
+                        key=f"tpl_{line_id}",
+                        horizontal=True
+                    )
+                    amber_content = row.get("amber_content") or ""
+                    card_bytes = generate_share_card(
+                        user_sentence=edited_text,
+                        amber_sentence=amber_content,
+                        username=user_id,
+                        template= template
+                    )
+                    st.image(card_bytes)
+                    st.download_button(
+                        "⬇ 保存图片",
+                        card_bytes,
+                        file_name="soul_echo_share.png",
+                        mime="image/png",
+                        key=f"dl_{line_id}"
+                    )
 
     st.markdown("""
 <div style="margin:32px 0 12px 0;">
