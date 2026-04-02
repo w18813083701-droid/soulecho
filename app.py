@@ -825,20 +825,9 @@ if st.session_state.mode == "gallery":
         st.markdown("<p style='text-align:center; color:#94a3b8;'>墙上还没有琥珀。</p>",
             unsafe_allow_html=True)
     else:
-        # 定义四块的宽度比和margin-top，打破对称
-        layouts = [
-            {"col": 0, "margin_top": "0px",  "rot": -1.5},
-            {"col": 1, "margin_top": "32px", "rot": 1.0},
-            {"col": 0, "margin_top": "16px", "rot": 1.8},
-            {"col": 1, "margin_top": "-8px", "rot": -0.8},
-        ]
-        col_left, col_right = st.columns([1.05, 0.95])
-        cols = [col_left, col_right]
-
         for i, row in enumerate(ambers[:4]):
             amber_id = row["id"]
             content = row["content"]
-            # 根据 is_anonymous 判断显示名称
             if row["is_anonymous"] == 1:
                 display_name = "匿名"
             elif row["author_id"] == st.session_state.username:
@@ -846,30 +835,20 @@ if st.session_state.mode == "gallery":
             else:
                 display_name = row["author_name"] or "匿名"
             
-            # 悬念截断：找第一个标点停顿截断，最多25字
             match = re.search(r'[，。！？、；]', content[12:28])
             if match:
                 cut = 12 + match.start() + 1
                 preview = content[:cut] + "……"
             else:
                 preview = content[:20] + "……"
-            
-            lay = layouts[i]
-            
-            with cols[lay["col"]]:
-                st.markdown(f"""
-                <div style="margin-top:{lay['margin_top']}; margin-bottom:20px; 
-                            padding:24px 22px; border-radius:8px; 
-                            background:#12151A; color:#EBEBF5; border:none; 
-                            transform:rotate({lay['rot']}deg); 
-                            box-shadow:0 12px 32px rgba(0,0,0,0.08);">
-                    <p style="color:#EBEBF5; font-size:14px; line-height:1.85; margin:0 0 10px 0; text-align:center;">{preview}</p>
-                    <p style="color:#A0A0B0; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                st.button("打开", key=f"open_{amber_id}",
-                          on_click=lambda aid=amber_id, c=content, rid=row["author_id"]:
-                              _open_amber(aid, c, rid, ambers, user_id))
+
+            st.button(
+                f"{preview}\n\n— {display_name}",
+                key=f"open_{amber_id}",
+                on_click=lambda aid=amber_id, c=content, rid=row["author_id"]:
+                    _open_amber(aid, c, rid, ambers, user_id),
+                use_container_width=True
+            )
 
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
