@@ -124,6 +124,24 @@ st.markdown("""
         display: flex; align-items: center; justify-content: space-around; 
         z-index: 9999; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); 
     } 
+
+    @media (max-width: 768px) { 
+        /* 强制两列不折叠 */ 
+        div[data-testid="stHorizontalBlock"] { 
+            flex-wrap: nowrap !important ; 
+            gap: 8px !important ; 
+        } 
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] { 
+            min-width: 0 !important ; 
+            flex: 1 !important ; 
+        } 
+
+        /* 卡片字号和内边距适配窄屏 */ 
+        .block-container { 
+            padding-left: 12px !important ; 
+            padding-right: 12px !important ; 
+        } 
+    } 
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
