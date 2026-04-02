@@ -142,6 +142,15 @@ st.markdown("""
             padding-right: 12px !important ; 
         } 
     } 
+
+    button[key^="open_"] { 
+        opacity: 0 !important; 
+        height: 0px !important; 
+        padding: 0 !important; 
+        margin: -16px 0 0 0 !important; 
+        position: relative !important; 
+        z-index: 10 !important; 
+    } 
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
@@ -841,7 +850,6 @@ if st.session_state.mode == "gallery":
                 preview = content[:cut] + "……"
             else:
                 preview = content[:20] + "……"
-
             st.button(
                 f"{preview}\n\n— {display_name}",
                 key=f"open_{amber_id}",
