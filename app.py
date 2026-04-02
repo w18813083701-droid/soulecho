@@ -143,37 +143,21 @@ st.markdown("""
         } 
     } 
 
-    button[key^="open_"] { 
+    /* 隐藏打开按钮，保留点击功能 */ 
+    .amber-btn-wrap > div > button { 
         opacity: 0 !important; 
-        height: 0px !important; 
+        height: 4px !important; 
+        min-height: 0 !important; 
         padding: 0 !important; 
-        margin: -16px 0 0 0 !important; 
-        position: relative !important; 
-        z-index: 10 !important; 
+        margin: -4px 0 8px 0 !important; 
+        border: none !important; 
+        background: transparent !important; 
     } 
 
     /* 防止横向溢出 */ 
     .stApp { 
         overflow-x: hidden !important ; 
     } 
- 
-    /* 卡片按钮改为黑底杂志风 */ 
-    button[key^="open_"] { 
-        background: #12151A !important ; 
-        color: #EBEBF5 !important ; 
-        border: none !important ; 
-        border-radius: 8px !important ; 
-        padding: 24px 20px !important ; 
-        margin-bottom: 8px !important ; 
-        text-align: left !important ; 
-        font-size: 16px !important ; 
-        line-height: 1.9 !important ; 
-        width: 100% !important ; 
-        box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important ; 
-        white-space: pre-wrap !important ; 
-    } 
-    button[key^="open_"]:hover { 
-        background: #1a1e25 !important ; 
         border: none !important ; 
     } 
 </style>""", unsafe_allow_html=True)
@@ -869,19 +853,32 @@ if st.session_state.mode == "gallery":
             else:
                 display_name = row["author_name"] or "匿名"
             
-            match = re.search(r'[，。！？、；]', content[12:28])
+            match = re.search(r'[，。！？、；]', content[4:12])
             if match:
-                cut = 12 + match.start() + 1
+                cut = 4 + match.start() + 1
                 preview = content[:cut] + "……"
             else:
-                preview = content[:20] + "……"
-            st.button(
-                f"{preview}\n\n— {display_name}",
-                key=f"open_{amber_id}",
-                on_click=lambda aid=amber_id, c=content, rid=row["author_id"]:
-                    _open_amber(aid, c, rid, ambers, user_id),
-                use_container_width=True
-            )
+                preview = content[:8] + "……"
+            st.markdown(f""" 
+            <div style="background:#12151A; border-radius:4px; 
+                        padding:32px 28px 24px 28px; margin-bottom:16px;"> 
+                <p style="color:#EBEBF5; font-size:17px; line-height:1.8; 
+                          margin:0 0 28px 0; letter-spacing:0.05em; 
+                          font-family:'Noto Serif SC', serif;">{preview}</p> 
+                <div style="display:flex; justify-content:space-between; align-items:center;"> 
+                    <span style="color:#404050; font-size:11px; letter-spacing:2px;">— {display_name}</span> 
+                    <span style="color:#404050; font-size:11px; letter-spacing:3px; 
+                                 border:0.5px solid #2a2d35; padding:5px 14px; border-radius:2px;">打 开</span> 
+                </div> 
+            </div> 
+            """, unsafe_allow_html=True) 
+            with st.container(): 
+                st.markdown('<div class="amber-btn-wrap">', unsafe_allow_html=True) 
+                st.button("打开", key=f"open_{amber_id}", 
+                          on_click=lambda aid=amber_id, c=content, rid=row["author_id"]: 
+                              _open_amber(aid, c, rid, ambers, user_id), 
+                          use_container_width=True) 
+                st.markdown('</div>', unsafe_allow_html=True)
 
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
