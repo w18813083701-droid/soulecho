@@ -142,6 +142,15 @@ st.markdown("""
             padding-right: 12px !important ; 
         } 
     } 
+
+    button[key^="open_"] { 
+        opacity: 0 !important; 
+        height: 0px !important; 
+        padding: 0 !important; 
+        margin: -16px 0 0 0 !important; 
+        position: relative !important; 
+        z-index: 10 !important; 
+    } 
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
@@ -827,10 +836,10 @@ if st.session_state.mode == "gallery":
     else:
         # 定义四块的宽度比和margin-top，打破对称
         layouts = [
-            {"col": 0, "margin_top": "0px",  "rot": -1.5},
-            {"col": 1, "margin_top": "32px", "rot": 1.0},
-            {"col": 0, "margin_top": "16px", "rot": 1.8},
-            {"col": 1, "margin_top": "-8px", "rot": -0.8},
+            {"col": 0, "margin_top": "0px",  "rot": 0},
+            {"col": 1, "margin_top": "0px", "rot": 0},
+            {"col": 0, "margin_top": "0px", "rot": 0},
+            {"col": 1, "margin_top": "0px", "rot": 0},
         ]
         col_left, col_right = st.columns([1.05, 0.95])
         cols = [col_left, col_right]
@@ -858,18 +867,18 @@ if st.session_state.mode == "gallery":
             
             with cols[lay["col"]]:
                 st.markdown(f"""
-                <div style="margin-top:{lay['margin_top']}; margin-bottom:20px; 
-                            padding:24px 22px; border-radius:8px; 
-                            background:#12151A; color:#EBEBF5; border:none; 
-                            transform:rotate({lay['rot']}deg); 
-                            box-shadow:0 12px 32px rgba(0,0,0,0.08);">
-                    <p style="color:#EBEBF5; font-size:14px; line-height:1.85; margin:0 0 10px 0; text-align:center;">{preview}</p>
-                    <p style="color:#A0A0B0; font-size:12px; margin:0; text-align:right;">— {display_name}</p>
+                <div style="margin-bottom:16px; padding:28px 20px; border-radius:8px;
+                            background:#12151A; color:#EBEBF5; border:none;
+                            box-shadow:0 12px 32px rgba(0,0,0,0.08);
+                            width:100%;">
+                    <p style="color:#EBEBF5; font-size:16px; line-height:1.9; margin:0 0 12px 0;">{preview}</p>
+                    <p style="color:#A0A0B0; font-size:13px; margin:0; text-align:right;">— {display_name}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 st.button("打开", key=f"open_{amber_id}",
                           on_click=lambda aid=amber_id, c=content, rid=row["author_id"]:
-                              _open_amber(aid, c, rid, ambers, user_id))
+                              _open_amber(aid, c, rid, ambers, user_id),
+                          use_container_width=True)
 
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
