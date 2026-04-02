@@ -151,6 +151,31 @@ st.markdown("""
         position: relative !important; 
         z-index: 10 !important; 
     } 
+
+    /* 防止横向溢出 */ 
+    .stApp { 
+        overflow-x: hidden !important ; 
+    } 
+ 
+    /* 卡片按钮改为黑底杂志风 */ 
+    button[key^="open_"] { 
+        background: #12151A !important ; 
+        color: #EBEBF5 !important ; 
+        border: none !important ; 
+        border-radius: 8px !important ; 
+        padding: 24px 20px !important ; 
+        margin-bottom: 8px !important ; 
+        text-align: left !important ; 
+        font-size: 16px !important ; 
+        line-height: 1.9 !important ; 
+        width: 100% !important ; 
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12) !important ; 
+        white-space: pre-wrap !important ; 
+    } 
+    button[key^="open_"]:hover { 
+        background: #1a1e25 !important ; 
+        border: none !important ; 
+    } 
 </style>""", unsafe_allow_html=True)
 
 # ─── 数据库 ───────────────────────────────────────────
