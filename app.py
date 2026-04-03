@@ -125,14 +125,6 @@ st.markdown("""
     } 
 
     @media (max-width: 768px) { 
-        div[data-testid="stHorizontalBlock"] { 
-            flex-wrap: nowrap !important; 
-            gap: 8px !important; 
-        } 
-        div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] { 
-            min-width: 0 !important; 
-            flex: 1 !important; 
-        } 
         .block-container { 
             padding-left: 12px !important; 
             padding-right: 12px !important; 
