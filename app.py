@@ -774,7 +774,7 @@ if _mode not in ("login"):
             st.session_state.mode = "gallery"
             st.rerun()
     with _c2:
-        _label = ("·  写 琥 珀  ·" if _mode == "write_amber" else "写 琥 珀")
+        _label = ("·  写今天的琥珀  ·" if _mode == "write_amber" else "写今天的琥珀")
         if st.button(_label, key="nav_write", use_container_width=True):
             st.session_state.mode = "write_amber"
             st.rerun()
@@ -833,10 +833,6 @@ if st.session_state.mode == "gallery":
                 "<p style='text-align:center; color:#94a3b8; font-size:13px;'>积分不足，无法再发。</p>",
                 unsafe_allow_html=True)
     else:
-        if st.button("写今天的琥珀", key="open_upload"):
-            st.session_state.mode = "write_amber"
-            st.session_state.extra_amber = False
-            st.rerun()
         st.markdown(
             "<p style='color:#888888; font-size:12px; margin-top:4px; line-height:1.6;'>"
             "每天2次免费额度 · 给人写信 +10积分 · 发帖消耗30积分</p>",
@@ -1397,9 +1393,7 @@ elif st.session_state.mode == "my_ambers":
         st.session_state.mode = "inbox"
         st.rerun()
     
-    if st.button("我的琥珀", key="my_ambers"):
-        st.session_state.mode = "my_ambers"
-        st.rerun()
+
 
     if st.button("发一个帖", key="write_post"):
         st.session_state.mode = "write_post"
@@ -1425,6 +1419,10 @@ elif st.session_state.mode == "my_ambers":
         st.rerun()
 
     if st.session_state.show_saved_lines:
+        st.markdown(
+            "<p style='color:#aaaaaa; font-size:12px; margin:0 0 16px 0; line-height:1.8;'>"
+            "与 AI 对话时，你觉得说得好的句子可以保存到这里。是你自己的话，不是琥珀。</p>",
+            unsafe_allow_html=True)
         saved = get_saved_lines(user_id)
         if not saved:
             st.markdown(
@@ -1505,6 +1503,10 @@ elif st.session_state.mode == "my_ambers":
         st.rerun()
 
     if st.session_state.show_my_ambers:
+        st.markdown(
+            "<p style='color:#aaaaaa; font-size:12px; margin:0 0 16px 0; line-height:1.8;'>"
+            "你发到广场上的琥珀。别人可以打开它，和你写信。</p>",
+            unsafe_allow_html=True)
         # 获取用户的所有琥珀，包括收到的信件数
         client = get_db()
         
