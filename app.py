@@ -796,28 +796,23 @@ if st.session_state.mode == "gallery":
             f"今天已留下{today_upload_count}块琥珀。再发一块需要消耗20积分（当前积分：{user_points}）。</p>",
             unsafe_allow_html=True)
         if user_points >= 20:
-            col_w, col_s = st.columns([2, 3])
-            with col_w:
-                if st.button("再写一块（-20积分）", key="open_upload"):
-                    st.session_state.mode = "write_amber"
-                    st.session_state.extra_amber = True
-                    st.rerun()
+            if st.button("再写一块（-20积分）", key="open_upload"):
+                st.session_state.mode = "write_amber"
+                st.session_state.extra_amber = True
+                st.rerun()
         else:
             st.markdown(
                 "<p style='text-align:center; color:#94a3b8; font-size:13px;'>积分不足，无法再发。</p>",
                 unsafe_allow_html=True)
     else:
-        col_w, col_s = st.columns([2, 3])
-        with col_w:
-            if st.button("写今天的琥珀", key="open_upload"):
-                st.session_state.mode = "write_amber"
-                st.session_state.extra_amber = False
-                st.rerun()
-        with col_s:
-            st.markdown(
-                "<p style='color:#888888; font-size:12px; margin-top:8px; line-height:1.6;'>"
-                "每天2次免费额度<br>给人写信 +10积分<br>发帖消耗30积分</p>",
-                unsafe_allow_html=True)
+        if st.button("写今天的琥珀", key="open_upload"):
+            st.session_state.mode = "write_amber"
+            st.session_state.extra_amber = False
+            st.rerun()
+        st.markdown(
+            "<p style='color:#888888; font-size:12px; margin-top:4px; line-height:1.6;'>"
+            "每天2次免费额度 · 给人写信 +10积分 · 发帖消耗30积分</p>",
+            unsafe_allow_html=True)
 
 
 
@@ -860,20 +855,18 @@ if st.session_state.mode == "gallery":
                 preview = content[:8] + "……"
             st.markdown(f""" 
             <div style="background:#12151A; border-radius:4px; 
-                        padding:32px 28px 24px 28px; margin-bottom:16px;"> 
+                        padding:32px 28px 20px 28px; margin-bottom:4px;"> 
                 <p style="color:#EBEBF5; font-size:17px; line-height:1.8; 
-                          margin:0 0 28px 0; letter-spacing:0.05em; 
+                          margin:0 0 20px 0; letter-spacing:0.05em; 
                           font-family:'Noto Serif SC', serif;">{preview}</p> 
                 <div style="display:flex; justify-content:space-between; align-items:center;"> 
                     <span style="color:#404050; font-size:11px; letter-spacing:2px;">— {display_name}</span> 
-                    <span style="color:#404050; font-size:11px; letter-spacing:3px; 
-                                 border:0.5px solid #2a2d35; padding:5px 14px; border-radius:2px;">打 开</span> 
                 </div> 
             </div> 
             """, unsafe_allow_html=True) 
-            with st.container(): 
-                st.markdown('<div class="amber-btn-wrap">', unsafe_allow_html=True) 
-                st.markdown('</div>', unsafe_allow_html=True)
+            if st.button("打 开", key=f"open_amber_{amber_id}"): 
+                _open_amber(amber_id, content, row["author_id"], ambers, user_id) 
+                st.rerun()
 
     # 刷新按钮放中间
     wall_refresh = st.session_state.get("wall_refresh_count", 0)
