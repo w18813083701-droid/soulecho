@@ -155,10 +155,9 @@ st.markdown("""
     } 
 
     /* 防止横向溢出 */ 
-    .stApp { 
+    .stApp, .block-container { 
         overflow-x: hidden !important ; 
-    } 
-        border: none !important ; 
+        max-width: 100vw !important ; 
     } 
 </style>""", unsafe_allow_html=True)
 
@@ -874,10 +873,6 @@ if st.session_state.mode == "gallery":
             """, unsafe_allow_html=True) 
             with st.container(): 
                 st.markdown('<div class="amber-btn-wrap">', unsafe_allow_html=True) 
-                st.button("打开", key=f"open_{amber_id}", 
-                          on_click=lambda aid=amber_id, c=content, rid=row["author_id"]: 
-                              _open_amber(aid, c, rid, ambers, user_id), 
-                          use_container_width=True) 
                 st.markdown('</div>', unsafe_allow_html=True)
 
     # 刷新按钮放中间
