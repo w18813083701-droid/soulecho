@@ -29,7 +29,6 @@ st.markdown("""
     footer {visibility: hidden;} 
     header {visibility: hidden;} 
 
-    /* 磨砂纸张肌理：利用径向渐变打破死白，中心微亮，边缘深沉 */ 
     .stApp { 
         background-color: #F4F4F4; 
         background-image: radial-gradient(circle at 50% 0%, #FFFFFF 0%, #EAEAEA 100%); 
@@ -42,7 +41,6 @@ st.markdown("""
         padding-bottom: 4rem !important; 
     } 
 
-    /* 标题重塑：加粗，拉开字间距，形成强烈的骨架感 */ 
     h1 { 
         font-family: "Noto Serif SC", "Songti SC", serif !important; 
         font-weight: 600 !important; 
@@ -50,26 +48,24 @@ st.markdown("""
         color: #111111 !important; 
     } 
 
-    /* 全局按钮：引入衬线体，悬浮时透出点睛的暗绯红 */ 
     .stButton > button { 
         font-family: "Noto Serif SC", "Songti SC", serif !important; 
         background: transparent; 
         border: 1px solid rgba(0,0,0,0.1); 
         color: #2D2D2D; 
-        border-radius: 4px; /* 更凌厉的直角微圆 */ 
+        border-radius: 4px; 
         font-size: 13px; 
         letter-spacing: 0.1em; 
         padding: 8px 16px; 
         transition: all 0.3s ease; 
     } 
     .stButton > button:hover { 
-        background: #7A1F1F; /* 点睛之色：暗绯红 */ 
+        background: #7A1F1F; 
         color: #FFFFFF !important; 
         border-color: #7A1F1F; 
         box-shadow: 0 4px 12px rgba(122,31,31,0.2); 
     } 
 
-    /* 黑曜石卡片：保持深邃，字体改为高级衬线体 */ 
     [data-testid="stButton"] button[kind="secondary"].amber-card-btn { 
         width: 100%; 
         text-align: left; 
@@ -93,7 +89,7 @@ st.markdown("""
         background: #16181C; 
     } 
 
-    /* 输入框极简处理 */ 
+    /* 输入框极简处理：限制最大宽度防止撑满屏幕 */ 
     .stTextArea textarea, .stTextInput input { 
         font-family: "Noto Serif SC", "Songti SC", serif !important; 
         background: rgba(255,255,255,0.8) !important; 
@@ -101,13 +97,17 @@ st.markdown("""
         border-radius: 4px !important; 
         font-size: 14px; 
         color: #1a1a1a; 
+        max-width: 100% !important; 
+        box-sizing: border-box !important; 
+    } 
+    .stTextInput > div { 
+        max-width: 480px !important; 
     } 
     .stTextArea textarea:focus, .stTextInput input:focus { 
         border-color: #7A1F1F !important; 
         box-shadow: 0 0 0 1px rgba(122,31,31,0.2) !important; 
     } 
 
-    /* 聊天消息字体 */ 
     .stChatMessage p { 
         font-family: "Noto Serif SC", "Songti SC", serif !important; 
         font-size: 15px; 
@@ -115,7 +115,6 @@ st.markdown("""
         color: #1a1a1a; 
     } 
 
-    /* 底部导航栏适配 */ 
     .block-container { padding-bottom: 80px !important; } 
     .bottom-nav { 
         position: fixed; bottom: 0; left: 0; right: 0; height: 62px; 
@@ -126,40 +125,46 @@ st.markdown("""
     } 
 
     @media (max-width: 768px) { 
-        /* 强制两列不折叠 */ 
         div[data-testid="stHorizontalBlock"] { 
-            flex-wrap: nowrap !important ; 
-            gap: 8px !important ; 
+            flex-wrap: nowrap !important; 
+            gap: 8px !important; 
         } 
         div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] { 
-            min-width: 0 !important ; 
-            flex: 1 !important ; 
+            min-width: 0 !important; 
+            flex: 1 !important; 
         } 
-
-        /* 卡片字号和内边距适配窄屏 */ 
         .block-container { 
-            padding-left: 12px !important ; 
-            padding-right: 12px !important ; 
+            padding-left: 12px !important; 
+            padding-right: 12px !important; 
         } 
-    } 
-
-    /* 隐藏打开按钮，保留点击功能 */ 
-    .amber-btn-wrap > div > button { 
-        opacity: 0 !important; 
-        height: 4px !important; 
-        min-height: 0 !important; 
-        padding: 0 !important; 
-        margin: -4px 0 8px 0 !important; 
-        border: none !important; 
-        background: transparent !important; 
     } 
 
     /* 防止横向溢出 */ 
     .stApp, .block-container { 
-        overflow-x: hidden !important ; 
-        max-width: 100vw !important ; 
+        overflow-x: hidden !important; 
+        max-width: 100vw !important; 
     } 
-</style>""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True) 
+
+# localStorage 自动登录：页面加载时读取保存的用户名 
+import streamlit.components.v1 as components 
+
+if "auto_login_checked" not in st.session_state: 
+    st.session_state.auto_login_checked = False 
+
+if not st.session_state.auto_login_checked: 
+    auto_login_result = components.html(""" 
+    <script> 
+        const saved = localStorage.getItem('soul_echo_username'); 
+        if (saved) { 
+            window.parent.postMessage({type: 'soul_echo_autologin', username: saved}, '*'); 
+        } else { 
+            window.parent.postMessage({type: 'soul_echo_autologin', username: ''}, '*'); 
+        } 
+    </script> 
+    <div id="auto_login_placeholder"></div> 
+    """, height=0) 
+    st.session_state.auto_login_checked = True
 
 # ─── 数据库 ───────────────────────────────────────────
 
@@ -639,22 +644,32 @@ if "username" not in st.session_state:
     st.session_state.username = None
 
 if st.session_state.username is None:
+    # 尝试从 URL query param 读取自动登录（由 localStorage JS 写入）
+    params = st.query_params
+    auto_user = params.get("_u", None)
+    if auto_user:
+        client = get_db()
+        result = client.table("users").select("username").eq("username", auto_user).execute()
+        if result.data:
+            st.session_state.username = auto_user
+            get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", auto_user).execute()
+            st.query_params.clear()
+            st.rerun()
+
+if st.session_state.username is None:
     st.markdown("""
-    <div style="text-align:center; padding:60px 20px;">
+    <div style="text-align:center; padding:60px 20px 24px 20px;">
         <h1 style="font-size:28px; font-weight:300; letter-spacing:8px;
                    color:#1a1a1a; margin:0 0 40px 0;">Soul Echo</h1>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 添加水平切换组件
+
     auth_mode = st.radio("", ["登录", "注册"], horizontal=True, label_visibility="collapsed")
-    
-    # 为禁用自动填充生成随机后缀
+
     if "auth_key_suffix" not in st.session_state:
         st.session_state.auth_key_suffix = str(random.randint(1000, 9999))
     key_suffix = st.session_state.auth_key_suffix
     
-    # 根据选择显示不同表单
     if auth_mode == "登录":
         st.subheader("登录")
         login_username = st.text_input("昵称", key=f"login_username_{key_suffix}")
@@ -662,7 +677,6 @@ if st.session_state.username is None:
         if st.button("登录", key="btn_login"):
             if login_username and login_password:
                 with st.spinner("登录中…"):
-                    # 清理用户名：去除前后空格并转为小写
                     cleaned_username = login_username.strip().lower()
                     client = get_db()
                     hashed_pw = hashlib.sha256(login_password.encode()).hexdigest()
@@ -671,6 +685,14 @@ if st.session_state.username is None:
                     if user:
                         st.session_state.username = user["username"]
                         get_db().table("users").update({"last_active": datetime.now().isoformat()}).eq("username", user["username"]).execute()
+                        components.html(f"""
+                        <script>
+                            localStorage.setItem('soul_echo_username', '{user["username"]}');
+                            const url = new URL(window.parent.location.href);
+                            url.searchParams.set('_u', '{user["username"]}');
+                            window.parent.history.replaceState({{}}, '', url.toString());
+                        </script>
+                        """, height=0)
                         st.rerun()
                     else:
                         st.error("昵称或密码错误")
@@ -683,7 +705,6 @@ if st.session_state.username is None:
         if st.button("注册", key="btn_register"):
             if reg_username and reg_password:
                 with st.spinner("注册中…"):
-                    # 清理用户名：去除前后空格并转为小写
                     cleaned_username = reg_username.strip().lower()
                     client = get_db()
                     try:
@@ -693,13 +714,21 @@ if st.session_state.username is None:
                             "password": hashed_pw
                         }).execute()
                         st.session_state.username = cleaned_username
+                        components.html(f"""
+                        <script>
+                            localStorage.setItem('soul_echo_username', '{cleaned_username}');
+                            const url = new URL(window.parent.location.href);
+                            url.searchParams.set('_u', '{cleaned_username}');
+                            window.parent.history.replaceState({{}}, '', url.toString());
+                        </script>
+                        """, height=0)
                         st.success("注册成功！")
                         st.rerun()
                     except Exception:
                         st.error("这个昵称已经被使用了")
             else:
                 st.warning("请输入昵称和密码")
-    
+
     st.stop()
 
 # ─── 底部导航栏 ────────────────────────────────────────
@@ -716,8 +745,19 @@ if _mode not in ("login"):
         background: rgba(250,250,250,0.97) !important;
         border-top: none !important;
         padding: 0 !important; margin: 0 !important;
-        max-width: 100% !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
         backdrop-filter: blur(12px) !important;
+    }
+    div[data-testid="stHorizontalBlock"]:has(
+        button[key="nav_gallery"]
+    ) > div[data-testid="stVerticalBlock"] {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
     }
     button[key="nav_gallery"],
     button[key="nav_write"],
@@ -726,6 +766,7 @@ if _mode not in ("login"):
         background: transparent !important;
         box-shadow: none !important;
         height: 62px !important;
+        width: 100% !important;
         font-size: 11px !important;
         color: #888888 !important;
         letter-spacing: 0.5px !important;
@@ -734,11 +775,6 @@ if _mode not in ("login"):
     </style>
     """, unsafe_allow_html=True)
 
-    _labels = {
-        "gallery": "广 场",
-        "write_amber": "写 琥 珀",
-        "my_ambers": "我 的",
-    }
     _c1, _c2, _c3 = st.columns(3)
     with _c1:
         _label = ("·  广 场  ·" if _mode == "gallery" else "广 场")
