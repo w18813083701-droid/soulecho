@@ -794,6 +794,13 @@ if "prompts_warmed" not in st.session_state:
 
 # ─── gallery 模式 ─────────────────────────────────────
 
+# ─── 登录后一次性弹窗：有未读帖提醒 ──────────────────────
+if not st.session_state.get("post_notice_shown"):
+    st.session_state.post_notice_shown = True
+    _unread_posts = get_db().table("posts").select("id", count="exact").eq("receiver_id", st.session_state.username).eq("is_replied", False).execute()
+    if _unread_posts.count and _unread_posts.count > 0:
+        st.toast(f"你有 {_unread_posts.count} 封未回复的帖，去收件箱看看。", icon="📬")
+
 if st.session_state.mode == "gallery":
     user_id = st.session_state.username
 
@@ -1222,8 +1229,10 @@ elif st.session_state.mode == "inbox":
                             label_visibility="collapsed")
                         if st.form_submit_button("寄出去"):
                             if reply_text.strip():
-                                send_message(None, user_id, post["sender_id"], reply_text.strip())
-                                client_db.table("posts").update({"is_replied": True}).eq("id", post["id"]).execute()
+                                client_db.table("posts").update({
+                                "is_replied": True,
+                                "reply_content": reply_text.strip()
+                            }).eq("id", post["id"]).execute()
                                 st.toast("回信已寄出", icon="🕊️")
                                 st.rerun()
                             else:
@@ -1413,7 +1422,7 @@ elif st.session_state.mode == "my_ambers":
 </div>
 """, unsafe_allow_html=True)
 
-    saved_label = "私人库 ✦" if not st.session_state.show_saved_lines else "私人库 ✦ ▲"
+    saved_label = "私人库" if not st.session_state.show_saved_lines else "私人库 ✦ ▲"
     if st.button(saved_label, key="toggle_saved_lines"):
         st.session_state.show_saved_lines = not st.session_state.show_saved_lines
         st.rerun()
@@ -1421,7 +1430,7 @@ elif st.session_state.mode == "my_ambers":
     if st.session_state.show_saved_lines:
         st.markdown(
             "<p style='color:#aaaaaa; font-size:12px; margin:0 0 16px 0; line-height:1.8;'>"
-            "与 AI 对话时，你觉得说得好的句子可以保存到这里。是你自己的话，不是琥珀。</p>",
+            "与 AI 对话时，你觉得说得好的句子可以保存到这里。</p>",
             unsafe_allow_html=True)
         saved = get_saved_lines(user_id)
         if not saved:
